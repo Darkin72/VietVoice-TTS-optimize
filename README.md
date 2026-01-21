@@ -16,7 +16,7 @@ Yêu cầu Python 3.8+ và NVIDIA GPU với TensorRT support.
 
 ```bash
 # Cài đặt các dependency cần thiết
-pip install fastapi uvicorn[standard] websockets sounddevice numpy torch
+uv sync
 ```
 
 ## Chạy Server (H100 Optimized)
@@ -24,11 +24,11 @@ pip install fastapi uvicorn[standard] websockets sounddevice numpy torch
 Server được cấu hình mặc định để tận dụng tối đa sức mạnh phần cứng:
 
 ```bash
-nohup bash -c "exec -a my_app python -m vietvoicetts" > se.log 2>&1 &
+nohup bash -c "uv run -m vietvoicetts" > se.log 2>&1 &
 ```
 
-kilL: pkill my_app
-_Server sẽ lắng nghe tại cổng 8000._
+kill: pkill my*app
+Server sẽ lắng nghe tại cổng 8000.*
 
 ## Sử dụng WebSocket API
 

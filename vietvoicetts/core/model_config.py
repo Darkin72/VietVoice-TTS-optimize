@@ -62,7 +62,7 @@ class ModelConfig:
     first_chunk_nfe_step: Optional[int] = (
         None  # If set, uses fewer steps for the first chunk
     )
-    micro_chunking_words: int = 5  # Number of words for the first chunk to reduce TTFB
+    micro_chunking_words: int = 0  # Number of words for the first chunk to reduce TTFB (0 to disable)
 
     def __post_init__(self):
         """Post-initialization validation"""

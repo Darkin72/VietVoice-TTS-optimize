@@ -157,13 +157,15 @@ class TTSEngine:
         output_names = self.model_session_manager.output_names["preprocess"]
 
         # Ensure correct type for audio input (some models want float32, some want int16)
-        # Based on logs, this specific model wants INT16
+        # We now load as int16 by default to match reference.
         input_info = session.get_inputs()[0]
-        if "int16" in input_info.type.lower() and audio.dtype != np.int16:
-            # Scale -1.0...1.0 to -32768...32767
-            audio = (audio * 32768.0).clip(-32768, 32767).astype(np.int16)
-        elif "float" in input_info.type.lower() and audio.dtype != np.float32:
-            audio = audio.astype(np.float32)
+        if "float" in input_info.type.lower() and audio.dtype != np.float32:
+            # Model wants float but we have int16. 
+            # If it's standard normalized float32 [-1, 1], we divide by 32768
+            audio = audio.astype(np.float32) / 32768.0
+        elif "int16" in input_info.type.lower() and audio.dtype != np.int16:
+            # Model wants int16 but we have float
+            audio = (audio * 32767).clip(-32768, 32767).astype(np.int16)
 
         inputs = {
             input_names[0]: audio,
@@ -313,21 +315,18 @@ class TTSEngine:
         reference_text: Optional[str] = None,
     ) -> Generator[np.ndarray, None, None]:
         """
-        Synthesize speech from text and stream audio chunks
-
-        Args:
-            text: Target text to synthesize
-            gender, group, area, emotion: Selection criteria for voice
-            reference_audio, reference_text: Custom voice data
-
-        Yields:
-            Audio chunks as numpy arrays
+        Synthesize speech from text and stream audio chunks with cross-fading for smooth transitions.
         """
         ref_audio, ref_text = self.model_session_manager.select_sample(
             gender, group, area, emotion, reference_audio, reference_text
         )
 
         inputs_list = self._prepare_inputs(ref_audio, ref_text, text)
+
+        cross_fade_duration = self.config.cross_fade_duration
+        sample_rate = self.config.sample_rate
+        cross_fade_samples = int(cross_fade_duration * sample_rate)
+        prev_chunk_tail = None
 
         for i, (audio, text_ids, max_duration, time_step, steps) in enumerate(
             inputs_list
@@ -356,8 +355,66 @@ class TTSEngine:
                 steps,
             )
 
-            generated_signal = self._run_decode(noise, ref_signal_len)
-            yield generated_signal
+            current_chunk = self._run_decode(noise, ref_signal_len).squeeze()
+            current_chunk = self.audio_processor.fix_clipped_audio(current_chunk)
+
+            # Streaming logic with cross-fade (Adapted from reference implementation)
+            if len(inputs_list) == 1:
+                yield current_chunk
+                return
+
+            if prev_chunk_tail is None:
+                if len(current_chunk) > cross_fade_samples:
+                    to_yield = current_chunk[:-cross_fade_samples]
+                    prev_chunk_tail = current_chunk[-cross_fade_samples:]
+                    yield to_yield
+                else:
+                    prev_chunk_tail = current_chunk
+            else:
+                actual_cross_fade = min(
+                    len(prev_chunk_tail), len(current_chunk), cross_fade_samples
+                )
+                if actual_cross_fade > 0:
+                    prev_overlap = prev_chunk_tail[-actual_cross_fade:]
+                    next_overlap = current_chunk[:actual_cross_fade]
+
+                    # Smooth transition
+                    fade_out = (
+                        np.cos(np.linspace(0, np.pi / 2, actual_cross_fade)) ** 2
+                    )
+                    fade_in = (
+                        np.sin(np.linspace(0, np.pi / 2, actual_cross_fade)) ** 2
+                    )
+
+                    cross_faded = (
+                        prev_overlap.astype(np.float32) * fade_out
+                        + next_overlap.astype(np.float32) * fade_in
+                    )
+
+                    # For consistency with input chunk type
+                    if current_chunk.dtype == np.int16:
+                        cross_faded = cross_faded.astype(np.int16)
+
+                    if len(prev_chunk_tail) > actual_cross_fade:
+                        yield prev_chunk_tail[:-actual_cross_fade]
+                    yield cross_faded
+
+                    if i == len(inputs_list) - 1:
+                        yield current_chunk[actual_cross_fade:]
+                    else:
+                        if len(current_chunk) > actual_cross_fade + cross_fade_samples:
+                            yield current_chunk[
+                                actual_cross_fade:-cross_fade_samples
+                            ]
+                            prev_chunk_tail = current_chunk[-cross_fade_samples:]
+                        else:
+                            prev_chunk_tail = current_chunk[actual_cross_fade:]
+                else:
+                    yield prev_chunk_tail
+                    if i == len(inputs_list) - 1:
+                        yield current_chunk
+                    else:
+                        prev_chunk_tail = current_chunk
 
     def synthesize(
         self,
