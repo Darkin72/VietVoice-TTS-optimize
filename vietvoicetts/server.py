@@ -23,6 +23,7 @@ async def lifespan(app: FastAPI):
         use_io_binding=True,
         use_cuda_graph=True,
         nfe_step=32,
+        speed=0.8,  # Slower speed for natural flow (Default: 1.0)
     )
     _tts_api = TTSApi(config)
     # Trigger model loading
