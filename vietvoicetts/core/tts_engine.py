@@ -164,6 +164,14 @@ class TTSEngine:
             # as the reference server does not divide by 32768 in Python code.
             audio = audio.astype(np.float32)
         elif "int16" in input_info.type.lower() and audio.dtype != np.int16:
+            audio = (audio * 32767).clip(-32768, 32767).astype(np.int16)
+
+        inputs = {
+            input_names[0]: audio,
+            input_names[1]: text_ids,
+            input_names[2]: max_duration,
+        }
+
         return session.run(output_names, inputs)
 
     def _run_transformer_steps(
