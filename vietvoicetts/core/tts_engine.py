@@ -204,12 +204,20 @@ class TTSEngine:
             try:
                 import torch
 
-                # Use torch for persistent GPU buffers
-                noise_tensor = torch.from_numpy(noise).cuda(device_id)
-                time_step_tensor = torch.from_numpy(time_step).cuda(device_id)
+                # Force float32 for noise and int32 for time_step
+                noise = noise.astype(np.float32)
+                time_step = time_step.astype(np.int32)
 
-                # Bind static inputs once to avoid transfers
+                noise_tensor_a = torch.from_numpy(noise).cuda(device_id)
+                noise_tensor_b = torch.empty_like(noise_tensor_a)
+                time_step_tensor_a = torch.from_numpy(time_step).cuda(device_id)
+                time_step_tensor_b = torch.empty_like(time_step_tensor_a)
+
+                # Bind constant static inputs once
                 def bind_gpu(name, arr):
+                    # Ensure float32 for model inputs if they are floats
+                    if arr.dtype == np.float64:
+                        arr = arr.astype(np.float32)
                     t = torch.from_numpy(arr).cuda(device_id)
                     io_binding.bind_input(
                         name,
@@ -228,50 +236,64 @@ class TTSEngine:
                 _cmt = bind_gpu(input_names[5], cat_mel_text)
                 _cmtd = bind_gpu(input_names[6], cat_mel_text_drop)
 
-                for _ in range(0, steps - 1, self.config.fuse_nfe):
+                for i in range(0, steps - 1, self.config.fuse_nfe):
+                    # Ping-pong between buffer A and B
+                    if i % 2 == 0:
+                        in_noise, out_noise = noise_tensor_a, noise_tensor_b
+                        in_time, out_time = time_step_tensor_a, time_step_tensor_b
+                    else:
+                        in_noise, out_noise = noise_tensor_b, noise_tensor_a
+                        in_time, out_time = time_step_tensor_b, time_step_tensor_a
+
                     io_binding.bind_input(
                         input_names[0],
                         device_type="cuda",
                         device_id=device_id,
                         element_type=np.float32,
-                        shape=noise_tensor.shape,
-                        buffer_ptr=noise_tensor.data_ptr(),
+                        shape=in_noise.shape,
+                        buffer_ptr=in_noise.data_ptr(),
                     )
                     io_binding.bind_input(
                         input_names[7],
                         device_type="cuda",
                         device_id=device_id,
                         element_type=np.int32,
-                        shape=time_step_tensor.shape,
-                        buffer_ptr=time_step_tensor.data_ptr(),
+                        shape=in_time.shape,
+                        buffer_ptr=in_time.data_ptr(),
                     )
-
-                    new_noise = torch.empty_like(noise_tensor)
-                    new_time_step = torch.empty_like(time_step_tensor)
 
                     io_binding.bind_output(
                         output_names[0],
                         device_type="cuda",
                         device_id=device_id,
                         element_type=np.float32,
-                        shape=new_noise.shape,
-                        buffer_ptr=new_noise.data_ptr(),
+                        shape=out_noise.shape,
+                        buffer_ptr=out_noise.data_ptr(),
                     )
                     io_binding.bind_output(
                         output_names[1],
                         device_type="cuda",
                         device_id=device_id,
                         element_type=np.int32,
-                        shape=new_time_step.shape,
-                        buffer_ptr=new_time_step.data_ptr(),
+                        shape=out_time.shape,
+                        buffer_ptr=out_time.data_ptr(),
                     )
 
                     session.run_with_iobinding(io_binding)
 
-                    noise_tensor = new_noise
-                    time_step_tensor = new_time_step
+                # Get final result from the last out_noise
+                final_noise = (
+                    noise_tensor_b
+                    if ((steps - 1) // self.config.fuse_nfe) % 2 != 0
+                    else noise_tensor_a
+                )
+                final_time = (
+                    time_step_tensor_b
+                    if ((steps - 1) // self.config.fuse_nfe) % 2 != 0
+                    else time_step_tensor_a
+                )
 
-                return noise_tensor.cpu().numpy(), time_step_tensor.cpu().numpy()
+                return final_noise.cpu().numpy(), final_time.cpu().numpy()
             except ImportError:
                 print(
                     "Warning: torch not found, falling back to standard ORT inference for IO binding"

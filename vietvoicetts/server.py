@@ -20,10 +20,10 @@ async def lifespan(app: FastAPI):
     global _tts_api
     print("🚀 Initializing Optimized TTS Engine for H100...")
     config = ModelConfig(
-        use_tensorrt=True,  # Re-enable for H100 performance
-        use_fp16=False,  # Keep FP32 for maximum quality
-        use_io_binding=True,  # Re-enable for faster H100 inference
-        use_cuda_graph=True,  # Enable for extra speed
+        use_tensorrt=True,  # Enable TensorRT
+        use_fp16=False,
+        use_io_binding=True,  # Enable IO Binding with stabilized pointers
+        use_cuda_graph=False,  # Disable CUDA Graph as it competes with TensorRT engine management
         micro_chunking_words=0,
         first_chunk_nfe_step=None,
         nfe_step=32,
