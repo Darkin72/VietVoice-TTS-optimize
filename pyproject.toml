@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=45", "wheel", "setuptools-scm"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "vietvoicetts"
-dynamic = ["version"]
+version = "0.1.0"
 description = "High-quality Text-to-Speech library for Vietnamese"
 readme = "README.md"
 requires-python = "==3.11.14"
@@ -26,9 +26,6 @@ dependencies = [
     "torch",
     "python-multipart",
     "onnxruntime-gpu>=1.23.2",
-    "tensorrt>=10.14.1.48.post1",
-    "tensorrt-cu12>=10.13.3.9",
-    "pycuda>=2026.1",
 ]
 
 [project.scripts]
@@ -40,13 +37,8 @@ vietvoice-tts = "vietvoicetts.cli:main"
 "Source" = "https://github.com/nguyenvulebinh/vietvoicetts"
 "Documentation" = "https://github.com/nguyenvulebinh/vietvoicetts/blob/main/README.md"
 
-[tool.setuptools.dynamic]
-version = {attr = "vietvoicetts.__version__"}
-
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["vietvoicetts*"]
-exclude = ["tests*"]
+[tool.hatch.build.targets.wheel]
+packages = ["vietvoicetts"]
 
 [tool.black]
 line-length = 88

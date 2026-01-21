@@ -79,12 +79,12 @@ Thay vì chờ đợi toàn bộ văn bản được xử lý xong, hệ thống
 - **Giải pháp**: Sử dụng `yield` trong Python để trả về audio chunk ngay sau bước `Decode.onnx`.
 - **Kết quả**: Giảm độ trễ cảm nhận cho người dùng từ vài giây xuống còn vài trăm miligiây.
 
-### B. Sử dung TensorRT & FP16
+### B. Sử dung CUDA Acceleration & FP16/FP32
 
-Trên các dòng GPU NVIDIA Ampere (A100) trở lên, việc sử dụng TensorRT giúp tận dụng tối đa sức mạnh của các **Tensor Cores**.
+Tối ưu hóa trực tiếp trên các dòng GPU NVIDIA đầu bảng (A100/H100) thông qua `CUDAExecutionProvider` và các thư viện cuDNN/cuBLAS.
 
-- **Giải pháp**: Chuyển đổi mô hình ONNX sang định dạng `.engine` với độ chính xác **FP16**.
-- **Kết quả**: Tốc độ xử lý Transformer có thể tăng gấp 2-4 lần, đồng thời giảm băng thông bộ nhớ.
+- **Giải pháp**: Tận dụng tối đa bộ nhớ VRAM lớn và băng thông cao của H100 để thực hiện tính toán song song.
+- **Kết quả**: Tốc độ xử lý Transformer tăng vượt trội so với CPU, duy trì độ trễ cực thấp cho các luồng streaming.
 
 ### C. I/O Binding (Pinned Memory)
 

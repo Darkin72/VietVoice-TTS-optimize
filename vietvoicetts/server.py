@@ -20,11 +20,8 @@ async def lifespan(app: FastAPI):
     global _tts_api
     print("🚀 Initializing Optimized TTS Engine for H100...")
     config = ModelConfig(
-        use_fp16=False,
         use_io_binding=True,
         use_cuda_graph=True,
-        micro_chunking_words=0,
-        first_chunk_nfe_step=None,
         nfe_step=32,
     )
     _tts_api = TTSApi(config)

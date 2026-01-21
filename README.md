@@ -4,7 +4,7 @@ Phiên bản tối ưu hóa đặc biệt của VietVoice-TTS dành cho các h�
 
 ## Các cải tiến chính
 
-- **TensorRT & FP16 Acceleration**: Tự động biên dịch và tối ưu hóa model cho GPU NVIDIA Ampere/Hopper, tăng tốc độ inference lên gấp nhiều lần.
+- **CUDA Acceleration**: Tối ưu hóa hiệu suất trực tiếp trên GPU NVIDIA thông qua CUDA Execution Provider, đảm bảo tốc độ ổn định và chất lượng cao nhất.
 - **RAM-only Inference**: Reference voice sample được nạp trực tiếp vào RAM lúc khởi chạy, loại bỏ hoàn toàn I/O disk khi suy luận.
 - **I/O Binding**: Giữ các tensor trên VRAM suốt quá trình lặp (Flow-Matching), loại bỏ chi phí sao chép dữ liệu giữa CPU và GPU.
 - **Micro-chunking & Streaming**: Chia nhỏ đoạn hội thoại đầu tiên và stream audio binary ngay lập tức qua WebSocket, đạt TTFB (Time To First Byte) cực thấp.
@@ -12,11 +12,11 @@ Phiên bản tối ưu hóa đặc biệt của VietVoice-TTS dành cho các h�
 
 ## Cài đặt
 
-Yêu cầu Python 3.8+ và NVIDIA GPU với TensorRT support.
+Yêu cầu Python 3.8+ và NVIDIA GPU với CUDA support.
 
 ```bash
 # Cài đặt các dependency cần thiết
-uv sync
+pip install .
 ```
 
 ## Chạy Server (H100 Optimized)
@@ -24,7 +24,7 @@ uv sync
 Server được cấu hình mặc định để tận dụng tối đa sức mạnh phần cứng:
 
 ```bash
-nohup bash -c "uv run -m vietvoicetts" > se.log 2>&1 &
+python -m vietvoicetts
 ```
 
 Or if you run in virtual environment:

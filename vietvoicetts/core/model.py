@@ -141,9 +141,6 @@ class ModelSessionManager:
                 self.cached_ref_text = sample_meta["text"]
                 print(f"✅ Sample loaded to RAM. Text: {self.cached_ref_text[:30]}...")
 
-                # Lấy danh sách providers tối ưu một lần duy nhất
-                preferred_providers = self._get_optimal_providers()
-
                 for model_name, filename in expected_models.items():
                     matching_member = next(
                         (m for m in tar_members if m.endswith(filename)), None
@@ -155,49 +152,16 @@ class ModelSessionManager:
                     model_bytes = extracted_file.read()
                     session_opts = self._create_session_options()
 
-                    session = None
+                    # Chỉ sử dụng CUDA providers đã được bắt buộc ở bước khởi tạo
+                    session = onnxruntime.InferenceSession(
+                        model_bytes, sess_options=session_opts, providers=self.providers
+                    )
 
-                    # Thử Tầng 1: TensorRT (Thử riêng cho từng model)
-                    if any(
-                        "Tensorrt" in (p[0] if isinstance(p, tuple) else p)
-                        for p in preferred_providers
-                    ):
-                        try:
-                            # Chỉ lấy Tensorrt provider để thử
-                            trt_p = [
-                                p
-                                for p in preferred_providers
-                                if (p[0] if isinstance(p, tuple) else p)
-                                == "TensorrtExecutionProvider"
-                            ]
-                            session = onnxruntime.InferenceSession(
-                                model_bytes, sess_options=session_opts, providers=trt_p
-                            )
-                            print(f"🚀 {model_name}: TensorRT Acceleration ENABLED")
-                        except Exception:
-                            # Nếu fail (như lỗi INT16), im lặng lùi về CUDA
-                            pass
-
-                    # Thử Tầng 2: CUDA (Nếu TRT fail hoặc không có trong list)
-                    if session is None:
-                        try:
-                            cuda_p = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-                            session = onnxruntime.InferenceSession(
-                                model_bytes, sess_options=session_opts, providers=cuda_p
-                            )
-                            actual = session.get_providers()
-                            if "CUDAExecutionProvider" in actual:
-                                print(f"🚀 {model_name}: CUDA Acceleration ENABLED")
-                            else:
-                                print(f"ℹ️ {model_name}: CPU Fallback (CUDA not picked)")
-                        except Exception:
-                            # Thử nốt CPU
-                            session = onnxruntime.InferenceSession(
-                                model_bytes,
-                                sess_options=session_opts,
-                                providers=["CPUExecutionProvider"],
-                            )
-                            print(f"ℹ️ {model_name}: Running on CPU")
+                    actual_provider = session.get_providers()[0]
+                    if actual_provider == "CUDAExecutionProvider":
+                        print(f"🚀 {model_name}: CUDA Acceleration ENABLED")
+                    else:
+                        print(f"⚠️ {model_name}: Running on {actual_provider}")
 
                     self.sessions[model_name] = session
                     self.input_names[model_name] = [
