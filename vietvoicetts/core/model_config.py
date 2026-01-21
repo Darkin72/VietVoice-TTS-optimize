@@ -39,9 +39,9 @@ class ModelConfig:
 
     # Audio processing
     cross_fade_duration: float = (
-        0.1  # Duration in seconds for cross-fading between chunks
+        0.3  # Duration in seconds for cross-fading between chunks
     )
-    max_chunk_duration: float = 15.0  # Maximum duration in seconds for each chunk
+    max_chunk_duration: float = 20.0  # Maximum duration in seconds for each chunk
     min_target_duration: float = 1.0  # Minimum duration in seconds for target audio
 
     # ONNX Runtime settings

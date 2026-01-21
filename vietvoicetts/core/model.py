@@ -66,8 +66,6 @@ class ModelSessionManager:
                     cuda_options = {
                         "device_id": 0,
                         "arena_extend_strategy": "kSameAsRequested",
-                        "gpu_mem_limit": 2 * 1024 * 1024 * 1024,
-                        "cudnn_conv_algo_search": "EXHAUSTIVE",
                         "do_copy_in_default_stream": True,
                     }
                     selected_providers.append((provider, cuda_options))

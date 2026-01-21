@@ -357,6 +357,12 @@ class TTSEngine:
             current_chunk = self._run_decode(noise, ref_signal_len).squeeze()
             current_chunk = self.audio_processor.fix_clipped_audio(current_chunk)
 
+            # Debug volume
+            max_v = np.max(np.abs(current_chunk))
+            print(
+                f"  Generated chunk {i+1} max volume: {max_v} (Type: {current_chunk.dtype})"
+            )
+
             # Streaming logic with cross-fade (Adapted from reference implementation)
             if len(inputs_list) == 1:
                 yield current_chunk
@@ -441,17 +447,14 @@ class TTSEngine:
             ):
                 generated_waves.append(chunk)
 
-            # Concatenate all generated waves with cross-fading
+            # Concatenate all generated waves
             if len(generated_waves) > 1:
-                print(
-                    f"Concatenating {len(generated_waves)} chunks with improved cross-fade (duration: {self.config.cross_fade_duration}s)..."
-                )
-
-            final_wave = self.audio_processor.concatenate_with_crossfade_improved(
-                generated_waves,
-                self.config.cross_fade_duration,
-                self.config.sample_rate,
-            )
+                # Chunks from synthesize_stream are already cross-faded
+                final_wave = np.concatenate([w.reshape(-1) for w in generated_waves])
+            elif len(generated_waves) == 1:
+                final_wave = generated_waves[0].reshape(-1)
+            else:
+                final_wave = np.array([])
 
             generation_time = time.time() - start_time
 

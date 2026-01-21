@@ -87,11 +87,11 @@ class AudioProcessor:
 
         # If the values are very small, they are likely in [-1, 1] range
         if max_val <= 1.5:
-            # Scale to standard int16 magnitude
-            return (audio * 29491.0).clip(-32768, 32767).astype(np.int16)
+            # Scale to standard int16 magnitude and round
+            return np.clip(np.round(audio * 29491.0), -32768, 32767).astype(np.int16)
 
-        # Already in large range, just cast safely
-        return np.clip(audio, -32768, 32767).astype(np.int16)
+        # Already in large range, just clip and round
+        return np.clip(np.round(audio), -32768, 32767).astype(np.int16)
 
     @staticmethod
     def concatenate_with_crossfade_improved(
