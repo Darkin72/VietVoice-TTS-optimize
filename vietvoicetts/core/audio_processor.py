@@ -68,7 +68,8 @@ class AudioProcessor:
 
         if max_val >= threshold:
             scale_factor = target / max_val
-            return audio * scale_factor
+            # Ensure we don't accidentally promote to float64 which is slower
+            return (audio * scale_factor).astype(audio.dtype)
         return audio
 
     @staticmethod

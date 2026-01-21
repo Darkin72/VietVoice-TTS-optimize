@@ -357,12 +357,6 @@ class TTSEngine:
             current_chunk = self._run_decode(noise, ref_signal_len).squeeze()
             current_chunk = self.audio_processor.fix_clipped_audio(current_chunk)
 
-            # Debug volume
-            max_v = np.max(np.abs(current_chunk))
-            print(
-                f"  Generated chunk {i+1} max volume: {max_v} (Type: {current_chunk.dtype})"
-            )
-
             # Streaming logic with cross-fade (Adapted from reference implementation)
             if len(inputs_list) == 1:
                 yield current_chunk
