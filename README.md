@@ -70,6 +70,8 @@ Các tham số trong `ModelConfig` đã được tinh chỉnh cho hiệu suất 
 - `micro_chunking_words`: 0 (Tắt để đạt chất lượng cao nhất)
 - `nfe_step`: 32 (Chất lượng âm thanh tiêu chuẩn)
 
----
+## Kết quả sau tối ưu:
+
+TTFB : từ 4s (code cũ, không stream) -> 0.5s (code mới có stream)
 
 _Dự án gốc bởi: [nguyenvulebinh/VietVoice-TTS](https://github.com/nguyenvulebinh/VietVoice-TTS)_
