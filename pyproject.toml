@@ -37,6 +37,11 @@ dependencies = [
     "soundfile>=0.10.3",
     "pydub>=0.25.0",
     "tqdm>=4.64.0",
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.22.0",
+    "websockets>=11.0",
+    "torch",
+    "python-multipart"
 ]
 
 [project.optional-dependencies]
