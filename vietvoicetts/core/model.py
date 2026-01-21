@@ -39,6 +39,7 @@ class ModelSessionManager:
     def _get_optimal_providers(self) -> List[str]:
         """Get the fastest available providers"""
         available_providers = onnxruntime.get_available_providers()
+        print(f"🔍 System detected providers: {available_providers}")
 
         provider_priority = []
 
@@ -51,7 +52,6 @@ class ModelSessionManager:
         for provider in provider_priority:
             if provider in available_providers:
                 if provider == "TensorrtExecutionProvider":
-                    # Configure TensorRT
                     trt_options = {
                         "trt_fp16_enable": self.config.use_fp16,
                         "trt_engine_cache_enable": True,
@@ -66,18 +66,13 @@ class ModelSessionManager:
                     cuda_options = {
                         "device_id": 0,
                         "arena_extend_strategy": "kSameAsRequested",
-                        "gpu_mem_limit": 2 * 1024 * 1024 * 1024,  # 2GB
+                        "gpu_mem_limit": 2 * 1024 * 1024 * 1024,
                         "cudnn_conv_algo_search": "EXHAUSTIVE",
                         "do_copy_in_default_stream": True,
                     }
                     selected_providers.append((provider, cuda_options))
                 else:
                     selected_providers.append(provider)
-
-        if "CPUExecutionProvider" not in [
-            p[0] if isinstance(p, tuple) else p for p in selected_providers
-        ]:
-            selected_providers.append("CPUExecutionProvider")
 
         return selected_providers
 
@@ -156,13 +151,19 @@ class ModelSessionManager:
                         self.cached_ref_audio = f.read()
                 else:
                     # Try tar fallback if not extracted successfully for some reason
-                    with tarfile.open(model_path, "r") as tar:
-                        self.cached_ref_audio = tar.extractfile(
-                            "cleaned_audios/" + HARDCODED_FILE
-                        ).read()
+                    extracted_file = tar.extractfile("cleaned_audios/" + HARDCODED_FILE)
+                    if extracted_file:
+                        self.cached_ref_audio = extracted_file.read()
+                    else:
+                        raise FileNotFoundError(
+                            f"Audio file '{HARDCODED_FILE}' not found in tar archive"
+                        )
 
                 self.cached_ref_text = sample_meta["text"]
                 print(f"✅ Sample loaded to RAM. Text: {self.cached_ref_text[:30]}...")
+
+                # Lấy danh sách providers tối ưu một lần duy nhất
+                preferred_providers = self._get_optimal_providers()
 
                 for model_name, filename in expected_models.items():
                     matching_member = next(
@@ -174,9 +175,51 @@ class ModelSessionManager:
                     extracted_file = tar.extractfile(matching_member)
                     model_bytes = extracted_file.read()
                     session_opts = self._create_session_options()
-                    session = onnxruntime.InferenceSession(
-                        model_bytes, sess_options=session_opts, providers=self.providers
-                    )
+
+                    session = None
+
+                    # Thử Tầng 1: TensorRT (Thử riêng cho từng model)
+                    if any(
+                        "Tensorrt" in (p[0] if isinstance(p, tuple) else p)
+                        for p in preferred_providers
+                    ):
+                        try:
+                            # Chỉ lấy Tensorrt provider để thử
+                            trt_p = [
+                                p
+                                for p in preferred_providers
+                                if (p[0] if isinstance(p, tuple) else p)
+                                == "TensorrtExecutionProvider"
+                            ]
+                            session = onnxruntime.InferenceSession(
+                                model_bytes, sess_options=session_opts, providers=trt_p
+                            )
+                            print(f"🚀 {model_name}: TensorRT Acceleration ENABLED")
+                        except Exception:
+                            # Nếu fail (như lỗi INT16), im lặng lùi về CUDA
+                            pass
+
+                    # Thử Tầng 2: CUDA (Nếu TRT fail hoặc không có trong list)
+                    if session is None:
+                        try:
+                            cuda_p = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+                            session = onnxruntime.InferenceSession(
+                                model_bytes, sess_options=session_opts, providers=cuda_p
+                            )
+                            actual = session.get_providers()
+                            if "CUDAExecutionProvider" in actual:
+                                print(f"🚀 {model_name}: CUDA Acceleration ENABLED")
+                            else:
+                                print(f"ℹ️ {model_name}: CPU Fallback (CUDA not picked)")
+                        except Exception:
+                            # Thử nốt CPU
+                            session = onnxruntime.InferenceSession(
+                                model_bytes,
+                                sess_options=session_opts,
+                                providers=["CPUExecutionProvider"],
+                            )
+                            print(f"ℹ️ {model_name}: Running on CPU")
+
                     self.sessions[model_name] = session
                     self.input_names[model_name] = [
                         inp.name for inp in session.get_inputs()
@@ -184,6 +227,12 @@ class ModelSessionManager:
                     self.output_names[model_name] = [
                         out.name for out in session.get_outputs()
                     ]
+
+                # In tổng kết
+                final_status = {
+                    k: v.get_providers()[0] for k, v in self.sessions.items()
+                }
+                print(f"✅ System Ready. Model Status: {final_status}")
 
                 vocab_member = next(
                     (m for m in tar_members if m.endswith("vocab.txt")), None

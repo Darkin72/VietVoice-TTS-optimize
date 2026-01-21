@@ -67,7 +67,13 @@ async def websocket_endpoint(websocket: WebSocket):
             chunk_count = 0
 
             for audio_chunk in api.synthesize_stream(text=text):
-                audio_int16 = (audio_chunk * 32767).astype(np.int16)
+                # Ensure audio is in int16 for bytes transmission
+                if audio_chunk.dtype != np.int16:
+                    # Assume it's float32 in [-1.0, 1.0]
+                    audio_int16 = (audio_chunk * 32767).astype(np.int16)
+                else:
+                    audio_int16 = audio_chunk
+
                 await websocket.send_bytes(audio_int16.tobytes())
                 chunk_count += 1
                 await asyncio.sleep(0)

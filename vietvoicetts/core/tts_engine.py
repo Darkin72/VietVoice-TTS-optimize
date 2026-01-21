@@ -151,10 +151,19 @@ class TTSEngine:
     def _run_preprocess(
         self, audio: np.ndarray, text_ids: np.ndarray, max_duration: np.ndarray
     ) -> Tuple[np.ndarray, ...]:
-        """Run preprocessing model"""
+        """Run preprocessing model with automatic type conversion"""
         session = self.model_session_manager.sessions["preprocess"]
         input_names = self.model_session_manager.input_names["preprocess"]
         output_names = self.model_session_manager.output_names["preprocess"]
+
+        # Ensure correct type for audio input (some models want float32, some want int16)
+        # Based on logs, this specific model wants INT16
+        input_info = session.get_inputs()[0]
+        if "int16" in input_info.type.lower() and audio.dtype != np.int16:
+            # Scale -1.0...1.0 to -32768...32767
+            audio = (audio * 32768.0).clip(-32768, 32767).astype(np.int16)
+        elif "float" in input_info.type.lower() and audio.dtype != np.float32:
+            audio = audio.astype(np.float32)
 
         inputs = {
             input_names[0]: audio,

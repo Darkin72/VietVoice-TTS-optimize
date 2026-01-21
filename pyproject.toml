@@ -41,15 +41,11 @@ dependencies = [
     "uvicorn[standard]>=0.22.0",
     "websockets>=11.0",
     "torch",
-    "python-multipart"
-]
-
-[project.optional-dependencies]
-cpu = [
-    "onnxruntime>=1.15.0",
-]
-gpu = [
-    "onnxruntime-gpu>=1.15.0",
+    "python-multipart",
+    "onnxruntime-gpu>=1.23.2",
+    "tensorrt>=10.14.1.48.post1",
+    "tensorrt-cu12>=10.13.3.9",
+    "pycuda>=2026.1",
 ]
 
 [project.scripts]
