@@ -57,12 +57,12 @@ class AudioProcessor:
     def fix_clipped_audio(audio: np.ndarray) -> np.ndarray:
         """Reduce volume if audio is clipping (Handles both float32 and int16)"""
         max_val = np.max(np.abs(audio))
-        
+
         # Determine if we are in int16 range or float32 range
         is_int_range = max_val > 1.5
         threshold = 32767.0 if is_int_range else 0.99
         target = 26214.0 if is_int_range else 0.8
-        
+
         if max_val >= threshold:
             scale_factor = target / max_val
             return audio * scale_factor
@@ -127,7 +127,7 @@ class AudioProcessor:
                 prev_overlap.astype(np.float32) * fade_out
                 + next_overlap[:cross_fade_samples].astype(np.float32) * fade_in
             )
-            
+
             # Match output type to input type
             if is_int_audio:
                 cross_faded_overlap = cross_faded_overlap.astype(np.int16)

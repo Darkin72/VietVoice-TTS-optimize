@@ -160,7 +160,7 @@ class TTSEngine:
         # We now load as int16 by default to match reference.
         input_info = session.get_inputs()[0]
         if "float" in input_info.type.lower() and audio.dtype != np.float32:
-            # Model wants float but we have int16. 
+            # Model wants float but we have int16.
             # If it's standard normalized float32 [-1, 1], we divide by 32768
             audio = audio.astype(np.float32) / 32768.0
         elif "int16" in input_info.type.lower() and audio.dtype != np.int16:
@@ -379,12 +379,8 @@ class TTSEngine:
                     next_overlap = current_chunk[:actual_cross_fade]
 
                     # Smooth transition
-                    fade_out = (
-                        np.cos(np.linspace(0, np.pi / 2, actual_cross_fade)) ** 2
-                    )
-                    fade_in = (
-                        np.sin(np.linspace(0, np.pi / 2, actual_cross_fade)) ** 2
-                    )
+                    fade_out = np.cos(np.linspace(0, np.pi / 2, actual_cross_fade)) ** 2
+                    fade_in = np.sin(np.linspace(0, np.pi / 2, actual_cross_fade)) ** 2
 
                     cross_faded = (
                         prev_overlap.astype(np.float32) * fade_out
@@ -403,9 +399,7 @@ class TTSEngine:
                         yield current_chunk[actual_cross_fade:]
                     else:
                         if len(current_chunk) > actual_cross_fade + cross_fade_samples:
-                            yield current_chunk[
-                                actual_cross_fade:-cross_fade_samples
-                            ]
+                            yield current_chunk[actual_cross_fade:-cross_fade_samples]
                             prev_chunk_tail = current_chunk[-cross_fade_samples:]
                         else:
                             prev_chunk_tail = current_chunk[actual_cross_fade:]

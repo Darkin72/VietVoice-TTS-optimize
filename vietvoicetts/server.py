@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
         use_io_binding=True,
         use_cuda_graph=True,
         micro_chunking_words=0,  # Disable for high quality
-        first_chunk_nfe_step=None, # Disable for high quality
+        first_chunk_nfe_step=None,  # Disable for high quality
         nfe_step=32,
     )
     _tts_api = TTSApi(config)
