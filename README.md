@@ -63,12 +63,12 @@ python client.py
 
 ## Cấu hình Tối ưu
 
-Các tham số trong `ModelConfig` đã được tinh chỉnh cho hiệu suất:
+Các tham số trong `ModelConfig` đã được tinh chỉnh cho hiệu suất (Yêu cầu CUDA):
 
-- `use_tensorrt`: True
 - `use_io_binding`: True
-- `micro_chunking_words`: 5 (Tạo đoạn mồi nhanh)
-- `first_chunk_nfe_step`: 16 (Giảm bước tính toán cho TTFB nhanh)
+- `use_cuda_graph`: True
+- `micro_chunking_words`: 0 (Tắt để đạt chất lượng cao nhất)
+- `nfe_step`: 32 (Chất lượng âm thanh tiêu chuẩn)
 
 ---
 

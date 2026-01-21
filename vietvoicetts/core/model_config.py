@@ -52,7 +52,6 @@ class ModelConfig:
     enable_cpu_mem_arena: bool = True
 
     # Optimization settings for H100
-    use_tensorrt: bool = False
     use_fp16: bool = False
     use_io_binding: bool = False
     use_cuda_graph: bool = False

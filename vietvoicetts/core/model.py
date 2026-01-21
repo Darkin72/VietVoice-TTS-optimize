@@ -37,42 +37,23 @@ class ModelSessionManager:
         self.cached_ref_text = None
 
     def _get_optimal_providers(self) -> List[str]:
-        """Get the fastest available providers"""
+        """Get the fastest available providers (Enforce CUDA)"""
         available_providers = onnxruntime.get_available_providers()
         print(f"🔍 System detected providers: {available_providers}")
 
-        provider_priority = []
+        if "CUDAExecutionProvider" not in available_providers:
+            raise RuntimeError(
+                "❌ CUDAExecutionProvider not found! This optimized version requires an NVIDIA GPU and CUDA to run. "
+                "Please ensure CUDA and cuDNN are correctly installed."
+            )
 
-        if self.config.use_tensorrt:
-            provider_priority.append("TensorrtExecutionProvider")
+        cuda_options = {
+            "device_id": 0,
+            "arena_extend_strategy": "kSameAsRequested",
+            "do_copy_in_default_stream": True,
+        }
 
-        provider_priority.extend(["CUDAExecutionProvider", "CPUExecutionProvider"])
-
-        selected_providers = []
-        for provider in provider_priority:
-            if provider in available_providers:
-                if provider == "TensorrtExecutionProvider":
-                    trt_options = {
-                        "trt_fp16_enable": self.config.use_fp16,
-                        "trt_engine_cache_enable": True,
-                        "trt_engine_cache_path": str(
-                            Path(self.config.model_cache_dir).expanduser() / "trt_cache"
-                        ),
-                    }
-                    if self.config.use_cuda_graph:
-                        trt_options["trt_cuda_graph_enable"] = True
-                    selected_providers.append((provider, trt_options))
-                elif provider == "CUDAExecutionProvider":
-                    cuda_options = {
-                        "device_id": 0,
-                        "arena_extend_strategy": "kSameAsRequested",
-                        "do_copy_in_default_stream": True,
-                    }
-                    selected_providers.append((provider, cuda_options))
-                else:
-                    selected_providers.append(provider)
-
-        return selected_providers
+        return [("CUDAExecutionProvider", cuda_options)]
 
     def _create_session_options(self) -> onnxruntime.SessionOptions:
         """Create optimized ONNX Runtime session options"""

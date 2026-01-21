@@ -191,12 +191,8 @@ class TTSEngine:
         input_names = self.model_session_manager.input_names["transformer"]
         output_names = self.model_session_manager.output_names["transformer"]
 
-        has_cuda = (
-            "CUDAExecutionProvider" in session.get_providers()
-            or "TensorrtExecutionProvider" in session.get_providers()
-        )
-
-        if self.config.use_io_binding and has_cuda:
+        # CUDA is enforced in ModelSessionManager
+        if self.config.use_io_binding:
             # IO Binding for faster inference
             io_binding = session.io_binding()
             device_id = 0
@@ -204,7 +200,7 @@ class TTSEngine:
             try:
                 import torch
 
-                # Force float32 for noise and int32 for time_step
+                # Force correct types
                 noise = noise.astype(np.float32)
                 time_step = time_step.astype(np.int32)
 
@@ -294,11 +290,24 @@ class TTSEngine:
                 )
 
                 return final_noise.cpu().numpy(), final_time.cpu().numpy()
-            except ImportError:
-                print(
-                    "Warning: torch not found, falling back to standard ORT inference for IO binding"
-                )
-                # Fallback to standard loop if torch isn't available for buffer management
+            except Exception as e:
+                print(f"Warning: IO Binding failed, falling back to standard ORT: {e}")
+
+        # Default path
+        for _ in range(0, steps - 1, self.config.fuse_nfe):
+            inputs = {
+                input_names[0]: noise,
+                input_names[1]: rope_cos_q,
+                input_names[2]: rope_sin_q,
+                input_names[3]: rope_cos_k,
+                input_names[4]: rope_sin_k,
+                input_names[5]: cat_mel_text,
+                input_names[6]: cat_mel_text_drop,
+                input_names[7]: time_step,
+            }
+            noise, time_step = session.run(output_names, inputs)
+        return noise, time_step
+        # Fallback to standard loop if torch isn't available for buffer management
 
         # Default path
         for _ in range(0, steps - 1, self.config.fuse_nfe):
