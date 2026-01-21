@@ -56,6 +56,9 @@ class AudioProcessor:
     @staticmethod
     def fix_clipped_audio(audio: np.ndarray) -> np.ndarray:
         """Reduce volume if audio is clipping (Handles both float32 and int16)"""
+        if len(audio) == 0:
+            return audio
+
         max_val = np.max(np.abs(audio))
 
         # Determine if we are in int16 range or float32 range
@@ -67,6 +70,28 @@ class AudioProcessor:
             scale_factor = target / max_val
             return audio * scale_factor
         return audio
+
+    @staticmethod
+    def to_int16_safe(audio: np.ndarray) -> np.ndarray:
+        """
+        Convert any audio signal to int16 safely for streaming.
+        Handles both [-1, 1] and [-32k, 32k] ranges without per-chunk normalization.
+        """
+        if audio.dtype == np.int16:
+            return audio
+
+        if len(audio) == 0:
+            return audio.astype(np.int16)
+
+        max_val = np.max(np.abs(audio))
+
+        # If the values are very small, they are likely in [-1, 1] range
+        if max_val <= 1.5:
+            # Scale to standard int16 magnitude
+            return (audio * 29491.0).clip(-32768, 32767).astype(np.int16)
+
+        # Already in large range, just cast safely
+        return np.clip(audio, -32768, 32767).astype(np.int16)
 
     @staticmethod
     def concatenate_with_crossfade_improved(

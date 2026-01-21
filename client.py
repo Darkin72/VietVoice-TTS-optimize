@@ -1,101 +1,117 @@
 import asyncio
 import websockets
 import json
-import numpy as np
-import sounddevice as sd
-import threading
-import queue
 import sys
+import wave
+import time
 
-# Audio configuration (matches server: 24kHz, 16-bit PCM)
+# Audio configuration
 SAMPLE_RATE = 24000
 CHANNELS = 1
+SAMPLE_WIDTH = 2  # int16
 
 
-class AudioPlayer:
+class AudioRecorder:
     def __init__(self):
-        self.audio_queue = queue.Queue()
-        self.stop_event = threading.Event()
-        self.thread = threading.Thread(target=self._play_thread, daemon=True)
-        self.thread.start()
+        self.reset()
 
-    def _play_thread(self):
-        """Thread to play audio from the queue to avoid blocking networking"""
-        with sd.OutputStream(
-            samplerate=SAMPLE_RATE, channels=CHANNELS, dtype="int16"
-        ) as stream:
-            while not self.stop_event.is_set():
-                try:
-                    data = self.audio_queue.get(timeout=0.1)
-                    stream.write(data)
-                except queue.Empty:
-                    continue
+    def reset(self):
+        self.buffers = []
+        self.send_time = None
+        self.first_audio_time = None
 
-    def add_audio(self, data):
-        self.audio_queue.put(np.frombuffer(data, dtype=np.int16))
+    def mark_send(self):
+        self.send_time = time.perf_counter()
+        self.first_audio_time = None
+
+    def add_audio(self, data: bytes):
+        if self.first_audio_time is None and self.send_time is not None:
+            self.first_audio_time = time.perf_counter()
+            ttfb = (self.first_audio_time - self.send_time) * 1000
+            print(f"[TTFB] {ttfb:.2f} ms (first audio byte received)")
+
+        self.buffers.append(data)
+
+    def save_wav(self, filename: str):
+        with wave.open(filename, "wb") as wf:
+            wf.setnchannels(CHANNELS)
+            wf.setsampwidth(SAMPLE_WIDTH)
+            wf.setframerate(SAMPLE_RATE)
+            wf.writeframes(b"".join(self.buffers))
 
 
-async def listen_to_server(ws, player):
-    """Wait for audio chunks or status messages from the server"""
+async def listen_to_server(ws, recorder: AudioRecorder):
     try:
         async for message in ws:
             if isinstance(message, bytes):
-                # It's an audio chunk
-                player.add_audio(message)
+                recorder.add_audio(message)
+
             else:
-                # It's a status message (JSON)
                 try:
                     status = json.loads(message)
+
                     if status.get("status") == "completed":
-                        print(
-                            f"\n[Server] Synthesis completed in {status.get('time')} ({status.get('chunks')} chunks received)"
+                        filename = f"tts_{int(time.time())}.wav"
+                        recorder.save_wav(filename)
+
+                        total_time = (
+                            time.perf_counter() - recorder.send_time
+                            if recorder.send_time
+                            else None
                         )
+
+                        if total_time:
+                            print(f"[Total] {total_time*1000:.2f} ms")
+
+                        recorder.reset()
                         print("Enter text: ", end="", flush=True)
+
                     elif "error" in status:
-                        print(f"\n[Error] {status['error']}")
+                        print(f"[Server Error] {status['error']}")
+
                 except json.JSONDecodeError:
-                    print(f"\n[Server] {message}")
+                    print(f"[Server] {message}")
+
     except websockets.exceptions.ConnectionClosed:
-        print("\n[Client] Connection closed by server.")
+        print("[Client] Connection closed.")
 
 
-async def send_text(ws):
-    """Loop to get user input and send to server"""
+async def send_text(ws, recorder: AudioRecorder):
     while True:
-        # aioconsole.ainput would be better but keeping it simple with standard loop
         text = await asyncio.get_event_loop().run_in_executor(
             None, input, "Enter text: "
         )
-        if text.strip().lower() in ["exit", "quit"]:
+
+        if text.strip().lower() in ("exit", "quit"):
             break
+
         if text.strip():
+            recorder.mark_send()
             await ws.send(text)
 
 
 async def main():
     uri = "ws://localhost:8000/ws/tts"
-    player = AudioPlayer()
+    recorder = AudioRecorder()
 
     print(f"Connecting to {uri}...")
     try:
         async with websockets.connect(uri) as websocket:
-            print("Connected! Type your text and press Enter (type 'exit' to quit).")
+            print("Connected. Type text to synthesize.")
 
-            # Run listener and sender concurrently
             await asyncio.gather(
-                listen_to_server(websocket, player), send_text(websocket)
+                listen_to_server(websocket, recorder),
+                send_text(websocket, recorder),
             )
+
     except ConnectionRefusedError:
-        print("Failed to connect. Is the server running at localhost:8000?")
+        print("Server not running.")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"Error: {e}")
 
 
 if __name__ == "__main__":
-    # Ensure sounddevice and websockets are installed:
-    # pip install sounddevice websockets numpy
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\nExiting...")
         sys.exit(0)

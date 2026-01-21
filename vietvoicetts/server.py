@@ -68,8 +68,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
             for audio_chunk in api.synthesize_stream(text=text):
                 # Ensure audio is in int16 for bytes transmission
-                # We use the robust normalization from AudioProcessor
-                audio_int16 = api.engine.audio_processor.normalize_to_int16(audio_chunk)
+                # to_int16_safe is robust for streaming (no per-chunk normalization artifacts)
+                audio_int16 = api.engine.audio_processor.to_int16_safe(audio_chunk)
 
                 await websocket.send_bytes(audio_int16.tobytes())
                 chunk_count += 1

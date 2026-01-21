@@ -156,23 +156,14 @@ class TTSEngine:
         input_names = self.model_session_manager.input_names["preprocess"]
         output_names = self.model_session_manager.output_names["preprocess"]
 
-        # Ensure correct type for audio input (some models want float32, some want int16)
-        # We now load as int16 by default to match reference.
+        # Handle type conversion matching the reference server logic.
+        # Reference server passes int16 (range ~32k) to the model.
         input_info = session.get_inputs()[0]
-        if "float" in input_info.type.lower() and audio.dtype != np.float32:
-            # Model wants float but we have int16.
-            # If it's standard normalized float32 [-1, 1], we divide by 32768
-            audio = audio.astype(np.float32) / 32768.0
+        if "float" in input_info.type.lower():
+            # If model wants float, provide float32 but maintain the magnitude (range ~32k)
+            # as the reference server does not divide by 32768 in Python code.
+            audio = audio.astype(np.float32)
         elif "int16" in input_info.type.lower() and audio.dtype != np.int16:
-            # Model wants int16 but we have float
-            audio = (audio * 32767).clip(-32768, 32767).astype(np.int16)
-
-        inputs = {
-            input_names[0]: audio,
-            input_names[1]: text_ids,
-            input_names[2]: max_duration,
-        }
-
         return session.run(output_names, inputs)
 
     def _run_transformer_steps(

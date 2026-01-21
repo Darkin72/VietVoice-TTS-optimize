@@ -27,8 +27,9 @@ Server được cấu hình mặc định để tận dụng tối đa sức m�
 nohup bash -c "uv run -m vietvoicetts" > se.log 2>&1 &
 ```
 
-kill: pkill my*app
-Server sẽ lắng nghe tại cổng 8000.*
+kill: pkill -f "uv run -m vietvoicetts"
+
+Server sẽ lắng nghe tại cổng 8000.\*
 
 ## Sử dụng WebSocket API
 
