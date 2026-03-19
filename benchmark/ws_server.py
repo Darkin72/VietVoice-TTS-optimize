@@ -45,8 +45,15 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         # Preload model/session at startup.
         _ = api.engine
-        # Run one tiny warm-up infer so first real request is ready.
-        await asyncio.to_thread(api.synthesize_to_bytes, "Xin chao.")
+        # Run warm-up infer with short/medium/long text so first real request is ready.
+        warmup_texts = (
+            "Xin chao.",
+            "Xin chao, day la cau warm-up trung binh de khoi tao on dinh runtime.",
+            "Day la cau warm-up dai hon de mo truoc cache shape va duong suy dien cho workload thuc te,"
+            " giup request dau tien phan hoi nhanh va it bien dong hon.",
+        )
+        for warmup_text in warmup_texts:
+            await asyncio.to_thread(api.synthesize_to_bytes, warmup_text)
         try:
             yield
         finally:

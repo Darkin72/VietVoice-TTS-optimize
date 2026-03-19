@@ -27,7 +27,7 @@ class ModelConfig:
     )
     model_cache_dir: str = "~/.cache/vietvoicetts"
     model_filename: str = "model-bin.pt"
-    nfe_step: int = 32
+    nfe_step: int = 28
     fuse_nfe: int = 1
     sample_rate: int = 24000
     speed: float = 1.0
