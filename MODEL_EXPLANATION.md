@@ -1,3 +1,117 @@
+# Giải thích chi tiết về Kiến trúc và Hoạt động của Model VietVoice-TTS
+
+VietVoice-TTS là một hệ thống chuyển đổi văn bản thành giọng nói (Text-to-Speech) tiên tiến, được tối ưu hóa đặc biệt cho tiếng Việt. Hệ thống này sử dụng kiến trúc mô hình sinh (generative model) dựa trên phương pháp **Flow-Matching** (tương tự như Diffusion nhưng hiệu quả hơn), được triển khai thông qua **ONNX Runtime** để đạt hiệu suất cao nhất trên cả CPU và GPU.
+
+Dưới đây là chi tiết các thành phần và quy trình hoạt động của model:
+
+## 1. Thành phần chính của hệ thống
+
+Hệ thống được chia thành 3 mô hình ONNX riêng biệt để tối ưu hóa quy trình tính toán:
+
+### A. Mô hình Tiền xử lý (Preprocess.onnx)
+
+Nhiệm vụ chính là chuyển đổi dữ liệu đầu vào thô thành các biểu diễn vector (embeddings) mà máy tính có thể hiểu được:
+
+- **Xử lý Văn bản**: Chuyển đổi văn bản tiếng Việt (đã được làm sạch) thành một chuỗi các chỉ số (indices) dựa trên bộ từ vựng (vocabulary). Quá trình này xử lý tốt các đặc thù của tiếng Việt như dấu thanh, các ký tự đặc biệt (ă, â, đ, ê, ô, ơ, ư).
+- **Xử lý Âm thanh Mẫu (Reference Audio)**: Trích xuất các thuộc tính giọng nói (âm sắc, phong cách, cảm xúc) từ một đoạn âm thanh mẫu dài vài giây. Đây chính là cơ chế giúp model có khả năng **Voice Cloning** (nhái giọng).
+- **Kết quả**: Tạo ra một vector ngữ cảnh kết hợp giữa nội dung văn bản mới và đặc điểm giọng nói mẫu.
+
+### B. Mô hình Biến đổi (Transformer.onnx)
+
+Đây là "trái tim" của hệ thống, sử dụng kiến trúc Transformer mạnh mẽ:
+
+- **Cơ chế Flow-Matching**: Thay vì tạo ra âm thanh ngay lập tức, model bắt đầu từ một tín hiệu nhiễu (noise) và thực hiện tinh chỉnh nó qua nhiều bước (iterations). Số bước này được điều chỉnh bởi tham số `nfe_step` (thường là 32 bước).
+- **Phép lặp (Iterative Refinement)**: Tại mỗi bước, model dự đoán "hướng đi" tiếp theo để biến đổi nhiễu ban đầu thành một biểu diễn Mel-spectrogram (hình ảnh của âm thanh) khớp với văn bản và giọng nói được yêu cầu.
+- **Tính linh hoạt**: Mô hình có thể điều chỉnh tốc độ (`speed`) bằng cách thay đổi độ dài dự kiến của Mel-spectrogram đầu ra.
+
+### C. Mô hình Giải mã (Decode.onnx) - Vocoder
+
+Nhiệm vụ cuối cùng là chuyển đổi Mel-spectrogram (miền tần số) trở lại thành sóng âm (miền thời gian) mà tai người nghe được:
+
+- **Hiệu quả**: Sử dụng các kỹ thuật giải mã nhanh để tạo ra âm thanh chất lượng cao 24kHz.
+- **Tái tạo**: Đảm bảo âm thanh sinh ra giữ được các đặc tính tự nhiên của giọng nói như độ vang, nhịp điệu và cảm xúc.
+
+## 2. Quy trình Xử lý Dữ liệu (Pipeline)
+
+### Bước 1: Chuẩn hóa Văn bản (Text Cleaning)
+
+- Loại bỏ các ký tự lạ, chuyển đổi các dấu câu đặc biệt (như `; : ( )`) thành dấu phẩy để tạo khoảng ngắt nghỉ tự nhiên.
+- Tự động thêm dấu chấm kết thúc nếu văn bản chưa có.
+
+### Bước 2: Chia đoạn (Chunking) & Ước lượng Thời gian
+
+- Do giới hạn bộ nhớ và để duy trì chất lượng ổn định, văn bản dài sẽ được chia thành các đoạn nhỏ (**chunks**) khoảng 10-15 giây.
+- Hệ thống ước lượng tốc độ nói (`speaking_rate`) dựa trên âm thanh mẫu để đảm bảo đoạn âm thanh sinh ra có độ dài hợp lý.
+
+### Bước 3: Suy luận (Inference)
+
+Mỗi đoạn văn bản sẽ đi qua chu trình: `Preprocess -> Iterative Transformer -> Decode`.
+
+### Bước 4: Hậu xử lý (Post-processing)
+
+- **Nối âm thanh (Concatenation)**: Các đoạn âm thanh nhỏ được nối lại với nhau.
+- **Cross-fading**: Sử dụng kỹ thuật làm mờ chéo (cross-fade) tại các điểm nối để loại bỏ tiếng "click" hoặc sự ngắt quãng đột ngột, tạo ra cảm giác liền mạch cho toàn bộ văn bản.
+- **Chuẩn hóa (Normalization)**: Điều chỉnh âm lượng về mức tiêu chuẩn (-0.1 dB) để tránh hiện tượng bị rè hoặc quá nhỏ.
+
+## 3. Các đặc điểm nổi bật trong bản Optimize
+
+1. **Tốc độ**: Sử dụng ONNX và tối ưu hóa các luồng xử lý (`intra_op_num_threads`) giúp model chạy nhanh hơn nhiều so với bản gốc dùng PyTorch.
+2. **Kiểm soát đa dạng**: Cho phép chọn giọng theo:
+   - **Giới tính**: Nam (Male), Nữ (Female).
+   - **Vùng miền**: Bắc (Northern), Trung (Central), Nam (Southern).
+   - **Cảm xúc**: Trung tính, nghiêm túc, buồn, vui, tức giận, ngạc nhiên...
+3. **Tiết kiệm tài nguyên**: Tự động dọn dẹp bộ nhớ đệm và quản lý phiên làm việc thông qua `ModelSessionManager`.
+
+## 4. Tham số cấu hình quan trọng
+
+- `nfe_step`: Số bước tinh chỉnh nhiễu. Càng cao âm thanh càng rõ nhưng chạy chậm hơn.
+- `sample_rate`: 24000 Hz (Chất lượng âm thanh tiêu chuẩn cho TTS).
+- `max_chunk_duration`: 15 giây (Giới hạn tối đa cho một lượt xử lý để đảm bảo độ chính xác).
+
+## 5. Chiến lược Tối ưu hóa Nâng cao cho Phần cứng Mạnh mẽ (A100/H100)
+
+Khi sở hữu phần cứng cao cấp (nhiều VRAM, nhiều nhân CPU), mục tiêu sẽ chuyển dịch từ việc chỉ chạy đúng sang việc đạt được **TTFB (Time To First Byte)** cực thấp và khả năng phục vụ hàng loạt bài toán cùng lúc.
+
+### A. Cơ chế Streaming (Generator Output)
+
+Thay vì chờ đợi toàn bộ văn bản được xử lý xong, hệ thống có thể trả về từng đoạn âm thanh nhỏ ngay khi nó vừa được giải mã.
+
+- **Giải pháp**: Sử dụng `yield` trong Python để trả về audio chunk ngay sau bước `Decode.onnx`.
+- **Kết quả**: Giảm độ trễ cảm nhận cho người dùng từ vài giây xuống còn vài trăm miligiây.
+
+### B. Sử dung CUDA Acceleration & FP16/FP32
+
+Tối ưu hóa trực tiếp trên các dòng GPU NVIDIA đầu bảng (A100/H100) thông qua `CUDAExecutionProvider` và các thư viện cuDNN/cuBLAS.
+
+- **Giải pháp**: Tận dụng tối đa bộ nhớ VRAM lớn và băng thông cao của H100 để thực hiện tính toán song song.
+- **Kết quả**: Tốc độ xử lý Transformer tăng vượt trội so với CPU, duy trì độ trễ cực thấp cho các luồng streaming.
+
+### C. I/O Binding (Pinned Memory)
+
+Việc copy dữ liệu giữa RAM (CPU) và VRAM (GPU) thường là nút thắt cổ chai về độ trễ.
+
+- **Giải pháp**: Sử dụng `io_binding` của ONNX Runtime để cấp phát dữ liệu trực tiếp trên GPU và giữ chúng ở đó suốt quá trình suy luận.
+- **Kết quả**: Loại bỏ chi phí sao chép dữ liệu không cần thiết ở mỗi bước lặp của Flow-Matching.
+
+### D. Pipeline "Gối đầu" (Asynchronous Prefetching)
+
+Tận dụng nhiều nhân CPU để chuẩn bị dữ liệu cho GPU.
+
+- **Giải pháp**: Trong khi GPU đang xử lý Transformer cho Chunk $N$, CPU sẽ thực hiện Tiền xử lý (Preprocess) cho Chunk $N+1$ trên một luồng riêng biệt.
+- **Kết quả**: GPU luôn bận rộn 100%, không phát sinh thời gian chờ "chết".
+
+### E. Chiến lược Micro-chunking cho First Byte
+
+Để đạt được TTFB nhanh nhất có thể:
+
+- **Giải pháp**: Chia câu đầu tiên thành một đoạn cực ngắn (vài từ), các câu sau giữ độ dài tiêu chuẩn. Đặt số bước lặp `nfe_step` thấp hơn (ví dụ 16 hoặc 24) cho riêng đoạn đầu tiên để âm thanh phát ra gần như ngay lập tức.
+
+### F. CUDA Graph (Ampere/Hopper Optimization)
+
+Với các bước lặp cố định trong Transformer:
+
+- **Giải pháp**: Sử dụng CUDA Graphs để "ghi lại" các kernel thực thi trên GPU, giúp giảm thiểu overhead của CPU khi phải ra lệnh cho GPU 32 lần liên tiếp.
+
 # Giải Thích Chi Tiết Cơ Chế Hoạt Động của VietVoice TTS
 
 ## Mục lục
@@ -90,11 +204,11 @@ Văn bản                  Audio ref
 
 Toàn bộ quá trình sinh giọng nói được chia làm **3 giai đoạn** tương ứng với 3 file model ONNX:
 
-| Giai đoạn | File ONNX | Vai trò |
-|---|---|---|
-| **1. Preprocess** | `preprocess.onnx` | Trích xuất mel spectrogram, khởi tạo nhiễu, chuẩn bị conditioning |
+| Giai đoạn          | File ONNX          | Vai trò                                                                                        |
+| ------------------ | ------------------ | ---------------------------------------------------------------------------------------------- |
+| **1. Preprocess**  | `preprocess.onnx`  | Trích xuất mel spectrogram, khởi tạo nhiễu, chuẩn bị conditioning                              |
 | **2. Transformer** | `transformer.onnx` | Lặp lại 32 lần, dần dần "chưng cất" nhiễu thành mel spectrogram theo phương pháp Flow Matching |
-| **3. Decode** | `decode.onnx` | Chuyển mel spectrogram thành sóng âm thực (Vocoder) |
+| **3. Decode**      | `decode.onnx`      | Chuyển mel spectrogram thành sóng âm thực (Vocoder)                                            |
 
 ---
 
@@ -105,6 +219,7 @@ Toàn bộ quá trình sinh giọng nói được chia làm **3 giai đoạn** t
 **Đầu vào:** File audio (.wav, .m4a, .mp3, ...)
 
 **Bước 1 – Mono & Resample:**
+
 ```
 AudioSegment.from_file(path)
     .set_channels(1)          ← chuyển về mono
@@ -114,14 +229,17 @@ AudioSegment.from_file(path)
 **Bước 2 – Chuẩn hóa về dải int16:**
 
 Loại bỏ DC offset (offset trung bình):
+
 ```
 audio = audio - mean(audio)
 ```
 
 Tính hệ số tỉ lệ sao cho giá trị lớn nhất đạt 90% dải int16 (để tránh clipping):
+
 ```
 scaling_factor = 29491.0 / max(|audio|)
 ```
+
 > **Tại sao 29491?** Vì 32767 × 0.9 = 29490.3 ≈ 29491. Dải int16 là [−32768, 32767]. Dùng 90% tạo ra headroom, giảm nguy cơ clipping.
 
 ```
@@ -129,6 +247,7 @@ audio_normalized = audio × scaling_factor   (cast sang int16)
 ```
 
 **Bước 3 – Reshape:** Chuyển từ vector 1D sang tensor 3D để phù hợp với đầu vào model:
+
 ```
 audio.reshape(1, 1, L)    ← (batch=1, channel=1, samples=L)
 ```
@@ -146,7 +265,7 @@ ref_text_len = len(ref_text.encode('utf-8')) + 3 × count(pause_punctuation in r
 ```
 
 > **Lý do dùng UTF-8 bytes thay vì số ký tự:** Tiếng Việt dùng ký tự đa byte (mỗi ký tự có dấu tốn 2–3 bytes), nên độ dài bytes tương quan tốt hơn với thời gian đọc thực tế.
-> 
+>
 > **Dấu câu ngừng nghỉ** (., , ? ! :) được nhân trọng số × 3 vì chúng gây ra khoảng dừng trong tiếng nói, làm tăng thời gian thực tế.
 
 **Bước 2 – Tính tốc độ đọc:**
@@ -189,26 +308,29 @@ chunk_audio_len = ref_audio_len + target_audio_len
 
 **Output của Preprocess:**
 
-| Output | Ký hiệu | Ý nghĩa |
-|---|---|---|
-| `noise` | $X_0$ | Nhiễu Gaussian ngẫu nhiên, shape `(1, N, d_mel)` |
-| `rope_cos_q`, `rope_sin_q` | $\cos\theta_q$, $\sin\theta_q$ | RoPE embeddings cho Query |
-| `rope_cos_k`, `rope_sin_k` | $\cos\theta_k$, $\sin\theta_k$ | RoPE embeddings cho Key |
-| `cat_mel_text` | $c$ | Điều kiện đầy đủ (mel ref + embedding text) |
-| `cat_mel_text_drop` | $\emptyset$ | Điều kiện bỏ trống (dùng cho CFG) |
-| `ref_signal_len` | $L_{ref}$ | Độ dài (frames) của audio tham chiếu |
+| Output                     | Ký hiệu                        | Ý nghĩa                                          |
+| -------------------------- | ------------------------------ | ------------------------------------------------ |
+| `noise`                    | $X_0$                          | Nhiễu Gaussian ngẫu nhiên, shape `(1, N, d_mel)` |
+| `rope_cos_q`, `rope_sin_q` | $\cos\theta_q$, $\sin\theta_q$ | RoPE embeddings cho Query                        |
+| `rope_cos_k`, `rope_sin_k` | $\cos\theta_k$, $\sin\theta_k$ | RoPE embeddings cho Key                          |
+| `cat_mel_text`             | $c$                            | Điều kiện đầy đủ (mel ref + embedding text)      |
+| `cat_mel_text_drop`        | $\emptyset$                    | Điều kiện bỏ trống (dùng cho CFG)                |
+| `ref_signal_len`           | $L_{ref}$                      | Độ dài (frames) của audio tham chiếu             |
 
 **Cụ thể preprocess thực hiện bên trong:**
 
 1. **Mel Spectrogram từ audio tham chiếu:**
+
    ```
    mel_ref = mel_spectrogram(audio)    ← shape (1, n_mels, T_ref)
    ```
 
 2. **Khởi tạo nhiễu Gaussian** (đây là điểm xuất phát của quá trình Flow Matching):
+
    ```
    X₀ ~ N(0, I)    ← shape (1, T_total, d_mel)
    ```
+
    Trong đó `T_total = T_ref + T_target` là tổng số frame mel.
 
 3. **Embedding văn bản:** Chuyển `text_ids` thành biểu diễn véc-tơ thông qua lớp embedding, sau đó ghép với mel spectrogram tham chiếu tạo thành tensor điều kiện `cat_mel_text`.
@@ -231,6 +353,7 @@ chunk_audio_len = ref_audio_len + target_audio_len
 $$\frac{dX_t}{dt} = v_\theta(X_t, t, c)$$
 
 Trong đó:
+
 - $X_t$ – trạng thái tại thời điểm $t \in [0, 1]$
 - $v_\theta$ – mạng neural (Transformer) dự đoán hướng di chuyển
 - $c$ – điều kiện (conditioning): mel ref + embedding văn bản
@@ -261,10 +384,12 @@ Tại **thời điểm inference**, ta giải ODE bằng phương pháp **Euler*
 $$X_{t+\Delta t} = X_t + \Delta t \cdot v_\theta(X_t, t, c)$$
 
 Trong đó:
+
 - $\Delta t = 1 / \text{nfe\_step} = 1/32$
 - $t_i = i / \text{nfe\_step}$, với $i = 0, 1, \ldots, 30$ (bước cuối là bước 31)
 
 **Vòng lặp trong code** (từ `tts_engine.py`):
+
 ```python
 for i in tqdm(range(0, self.config.nfe_step - 1, self.config.fuse_nfe),
               total=self.config.nfe_step // self.config.fuse_nfe - 1):
@@ -274,6 +399,7 @@ for i in tqdm(range(0, self.config.nfe_step - 1, self.config.fuse_nfe),
 `fuse_nfe = 1` nghĩa là mỗi lần gọi model thực hiện **1 bước Euler**. Vòng lặp chạy `31` lần (từ bước 0 đến bước 30 với bước cuối là 31 được xử lý nội bộ).
 
 Tại mỗi bước, model nhận:
+
 - `noise` ($X_t$): trạng thái hiện tại
 - `time_step` ($t$): thời điểm hiện tại
 - `rope_cos_q/sin_q`, `rope_cos_k/sin_k`: positional encoding cố định
@@ -281,6 +407,7 @@ Tại mỗi bước, model nhận:
 - `cat_mel_text_drop` ($\emptyset$): điều kiện trống (cho CFG)
 
 Và trả về:
+
 - `noise` mới ($X_{t+\Delta t}$): trạng thái sau bước Euler
 - `time_step` mới ($t + \Delta t$)
 
@@ -291,6 +418,7 @@ Và trả về:
 **Classifier-Free Guidance** là kỹ thuật quan trọng giúp model bám sát điều kiện (văn bản + giọng nói tham chiếu) khi sinh âm thanh.
 
 **Ý tưởng:** Chạy model song song với **2 điều kiện**:
+
 1. **Có điều kiện** ($c$ = mel ref + text): `cat_mel_text` → cho ra $v_\theta(X_t, t, c)$
 2. **Không có điều kiện** ($\emptyset$): `cat_mel_text_drop` → cho ra $v_\theta(X_t, t, \emptyset)$
 
@@ -407,12 +535,14 @@ Shape: `(1, T_total, d_mel)`
 Model `decode.onnx` thực hiện vai trò **Vocoder** – chuyển mel spectrogram thành sóng âm thực.
 
 **Đầu vào:**
+
 - `noise` ($X_1$): mel spectrogram đã sinh, shape `(1, T_total, d_mel)`
 - `ref_signal_len` ($L_{ref}$): số frame mel của audio tham chiếu
 
 **Xử lý nội bộ của decode:**
 
 Vocoder chỉ lấy **phần target** (loại bỏ phần tham chiếu):
+
 ```
 mel_target = X₁[:, L_ref:, :]    ← chỉ lấy phần mới sinh ra
 ```
@@ -423,6 +553,7 @@ Sau đó áp dụng **Vocoder** (thường là HiFi-GAN hoặc BigVGAN) để ch
 $$S(n, k) = \left| \sum_{m=0}^{N-1} x(m + nH) \cdot w(m) \cdot e^{-j2\pi km/N} \right|^2$$
 
 Trong đó:
+
 - $N$ = FFT size (thường 1024)
 - $H$ = hop length = 256
 - $w(m)$ = cửa sổ Hann/Hamming
@@ -444,11 +575,13 @@ Vocoder (HiFi-GAN/BigVGAN) **đảo ngược** quá trình này – từ log mel
 ### 6.1 Làm sạch văn bản
 
 Chỉ giữ lại các ký tự hợp lệ:
+
 - Bảng chữ cái tiếng Anh (a-z, A-Z, 0-9)
 - Ký tự tiếng Việt có dấu
 - Dấu câu: `. , ! ? ' @ $ % & / : ; ( ) ` và dấu cách
 
 **Quy trình làm sạch** (theo thứ tự):
+
 1. Nếu có ký tự xuống dòng `\n`: chia thành đoạn, mỗi đoạn thêm `.` ở cuối nếu chưa có
 2. Thay tất cả ký tự không hợp lệ bằng dấu cách
 3. Thay `;:()` bằng `,`
@@ -463,16 +596,20 @@ VietVoice dùng **tokenization cấp ký tự** (character-level), không dùng 
 **Vocabulary file:** `vocab.txt` – mỗi dòng là một ký tự, chỉ số là số thứ tự dòng.
 
 **Chuyển văn bản thành chỉ số:**
+
 ```python
 text_ids = [vocab_char_map.get(c, 0) for c in text]
 ```
+
 Ký tự không tìm thấy trong vocab → index 0 (padding/unknown).
 
 **Ghép văn bản tham chiếu và đích:**
+
 ```
 combined_text = reference_text + target_text
 text_ids = text_to_indices([list(combined_text)])
 ```
+
 → shape `(1, T_text)` với `T_text = len(reference_text) + len(target_text)`
 
 ### 6.3 Tính độ dài văn bản
@@ -519,20 +656,25 @@ Dùng `soundfile.write` với format `WAVEX` (WAV Extensible, hỗ trợ metadat
 ### 8.1 Lý do cần chunking
 
 Model có giới hạn về **tổng thời lượng** xử lý mỗi lần (`max_chunk_duration = 15.0` giây mặc định). Nếu:
+
 ```
 ref_audio_duration + target_audio_duration > max_chunk_duration
 ```
+
 thì cần chia văn bản đích thành nhiều chunk.
 
 ### 8.2 Công thức chia chunk
 
 **Bước 1 – Tính thời lượng khả dụng cho target mỗi chunk:**
+
 ```
 available_target_duration = max_chunk_duration - ref_audio_duration - safety_margin
 ```
+
 `safety_margin = 1.0` giây để tránh vượt giới hạn.
 
 **Bước 2 – Tính số ký tự tối đa mỗi chunk:**
+
 ```
 max_chars_per_chunk = int(speaking_rate × available_target_duration × speed)
 ```
@@ -670,70 +812,70 @@ OUTPUT: File WAV ở 24kHz
 
 ### Nhóm 1: Xử lý âm thanh
 
-| Công thức | Ý nghĩa |
-|---|---|
+| Công thức                                                          | Ý nghĩa                                 |
+| ------------------------------------------------------------------ | --------------------------------------- |
 | $x_{norm} = (x - \bar{x}) \cdot \frac{29491}{\max\|x - \bar{x}\|}$ | Chuẩn hóa audio về int16 (90% headroom) |
-| $n_{frames} = \lfloor L / H \rfloor + 1$ | Số frame mel từ $L$ mẫu, hop $H=256$ |
-| $\text{RMS} = \sqrt{\frac{1}{N}\sum x_i^2}$ | Âm lượng trung bình (Root Mean Square) |
+| $n_{frames} = \lfloor L / H \rfloor + 1$                           | Số frame mel từ $L$ mẫu, hop $H=256$    |
+| $\text{RMS} = \sqrt{\frac{1}{N}\sum x_i^2}$                        | Âm lượng trung bình (Root Mean Square)  |
 
 ### Nhóm 2: Ước lượng thời gian
 
-| Công thức | Ý nghĩa |
-|---|---|
-| $r = L_{text\_ref} / d_{ref}$ | Tốc độ đọc (bytes/giây) |
-| $d_{target} = \max\!\left(\frac{L_{text\_target}}{r \cdot s}, 1.0\right)$ | Thời lượng audio đích |
-| $L_{max} = d_{max} - d_{ref} - 1.0$ | Thời lượng target tối đa mỗi chunk |
+| Công thức                                                                 | Ý nghĩa                            |
+| ------------------------------------------------------------------------- | ---------------------------------- |
+| $r = L_{text\_ref} / d_{ref}$                                             | Tốc độ đọc (bytes/giây)            |
+| $d_{target} = \max\!\left(\frac{L_{text\_target}}{r \cdot s}, 1.0\right)$ | Thời lượng audio đích              |
+| $L_{max} = d_{max} - d_{ref} - 1.0$                                       | Thời lượng target tối đa mỗi chunk |
 
 ### Nhóm 3: Flow Matching
 
-| Công thức | Ý nghĩa |
-|---|---|
-| $X_t = (1-t)X_0 + tX_1$ | Linear interpolation path |
-| $u_t = X_1 - X_0$ | Target vector field (hằng số) |
-| $X_{t+\Delta t} = X_t + \Delta t \cdot v_\theta(X_t, t, c)$ | Euler update |
-| $v_{cfg} = v_\emptyset + \alpha(v_c - v_\emptyset)$ | Classifier-Free Guidance |
+| Công thức                                                   | Ý nghĩa                       |
+| ----------------------------------------------------------- | ----------------------------- |
+| $X_t = (1-t)X_0 + tX_1$                                     | Linear interpolation path     |
+| $u_t = X_1 - X_0$                                           | Target vector field (hằng số) |
+| $X_{t+\Delta t} = X_t + \Delta t \cdot v_\theta(X_t, t, c)$ | Euler update                  |
+| $v_{cfg} = v_\emptyset + \alpha(v_c - v_\emptyset)$         | Classifier-Free Guidance      |
 
 ### Nhóm 4: Transformer & Attention
 
-| Công thức | Ý nghĩa |
-|---|---|
-| $\text{Attn}(Q,K,V) = \text{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right)V$ | Multi-Head Attention |
-| $\theta_i = 10000^{-2i/d}$ | RoPE base frequencies |
-| $q_m^{(2i)} \leftarrow q_m^{(2i)}\cos(m\theta_i) - q_m^{(2i+1)}\sin(m\theta_i)$ | RoPE rotation (phần thực) |
-| $q_m^{(2i+1)} \leftarrow q_m^{(2i)}\sin(m\theta_i) + q_m^{(2i+1)}\cos(m\theta_i)$ | RoPE rotation (phần ảo) |
+| Công thức                                                                         | Ý nghĩa                   |
+| --------------------------------------------------------------------------------- | ------------------------- |
+| $\text{Attn}(Q,K,V) = \text{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right)V$   | Multi-Head Attention      |
+| $\theta_i = 10000^{-2i/d}$                                                        | RoPE base frequencies     |
+| $q_m^{(2i)} \leftarrow q_m^{(2i)}\cos(m\theta_i) - q_m^{(2i+1)}\sin(m\theta_i)$   | RoPE rotation (phần thực) |
+| $q_m^{(2i+1)} \leftarrow q_m^{(2i)}\sin(m\theta_i) + q_m^{(2i+1)}\cos(m\theta_i)$ | RoPE rotation (phần ảo)   |
 
 ### Nhóm 5: Cross-fade
 
-| Công thức | Ý nghĩa |
-|---|---|
-| $f_{out}(i) = \cos^2\!\left(\frac{i\pi}{2N_{cf}}\right)$ | Cosine fade-out |
-| $f_{in}(i) = \sin^2\!\left(\frac{i\pi}{2N_{cf}}\right)$ | Cosine fade-in |
-| $f_{out}(i) + f_{in}(i) = 1$ | Bảo toàn năng lượng |
+| Công thức                                                                | Ý nghĩa             |
+| ------------------------------------------------------------------------ | ------------------- |
+| $f_{out}(i) = \cos^2\!\left(\frac{i\pi}{2N_{cf}}\right)$                 | Cosine fade-out     |
+| $f_{in}(i) = \sin^2\!\left(\frac{i\pi}{2N_{cf}}\right)$                  | Cosine fade-in      |
+| $f_{out}(i) + f_{in}(i) = 1$                                             | Bảo toàn năng lượng |
 | $r_{vol} = \text{clip}(\text{RMS}_{prev}/\text{RMS}_{next},\ 0.7,\ 1.5)$ | Điều chỉnh âm lượng |
 
 ---
 
 ## Phụ lục A: Thông số cấu hình mặc định
 
-| Tham số | Giá trị | Giải thích |
-|---|---|---|
-| `sample_rate` | 24000 | Tần số lấy mẫu (Hz) |
-| `hop_length` | 256 | Bước nhảy STFT (mẫu) |
-| `nfe_step` | 32 | Số bước Euler giải ODE |
-| `fuse_nfe` | 1 | Số bước mỗi lần gọi transformer |
-| `speed` | 1.0 | Tốc độ nói (1.0 = bình thường) |
-| `random_seed` | 9527 | Seed ngẫu nhiên (tái lặp kết quả) |
-| `max_chunk_duration` | 15.0s | Giới hạn tổng thời lượng mỗi chunk |
-| `min_target_duration` | 1.0s | Thời lượng target tối thiểu |
-| `cross_fade_duration` | 0.1s | Thời lượng overlap khi ghép chunk |
+| Tham số               | Giá trị | Giải thích                         |
+| --------------------- | ------- | ---------------------------------- |
+| `sample_rate`         | 24000   | Tần số lấy mẫu (Hz)                |
+| `hop_length`          | 256     | Bước nhảy STFT (mẫu)               |
+| `nfe_step`            | 32      | Số bước Euler giải ODE             |
+| `fuse_nfe`            | 1       | Số bước mỗi lần gọi transformer    |
+| `speed`               | 1.0     | Tốc độ nói (1.0 = bình thường)     |
+| `random_seed`         | 9527    | Seed ngẫu nhiên (tái lặp kết quả)  |
+| `max_chunk_duration`  | 15.0s   | Giới hạn tổng thời lượng mỗi chunk |
+| `min_target_duration` | 1.0s    | Thời lượng target tối thiểu        |
+| `cross_fade_duration` | 0.1s    | Thời lượng overlap khi ghép chunk  |
 
 ## Phụ lục B: Lựa chọn giọng nói
 
-| Chiều | Giá trị hợp lệ |
-|---|---|
-| `gender` | `male`, `female` |
-| `area` | `northern`, `southern`, `central` |
-| `group` | `story`, `news`, `audiobook`, `interview`, `review` |
+| Chiều     | Giá trị hợp lệ                                                         |
+| --------- | ---------------------------------------------------------------------- |
+| `gender`  | `male`, `female`                                                       |
+| `area`    | `northern`, `southern`, `central`                                      |
+| `group`   | `story`, `news`, `audiobook`, `interview`, `review`                    |
 | `emotion` | `neutral`, `serious`, `monotone`, `sad`, `surprised`, `happy`, `angry` |
 
 Mẫu được lọc từ `audio_metadata.json` (trong file model) theo các tiêu chí này, rồi chọn ngẫu nhiên trong tập hợp phù hợp.
@@ -742,12 +884,12 @@ Mẫu được lọc từ `audio_metadata.json` (trong file model) theo các ti�
 
 Model được tối ưu qua các tùy chọn ONNX Runtime:
 
-| Tùy chọn | Giá trị | Lợi ích |
-|---|---|---|
+| Tùy chọn                   | Giá trị          | Lợi ích                                            |
+| -------------------------- | ---------------- | -------------------------------------------------- |
 | `graph_optimization_level` | `ORT_ENABLE_ALL` | Tự động tối ưu graph: fusion ops, constant folding |
-| `execution_mode` | `ORT_SEQUENTIAL` | Phù hợp model dạng chuỗi (pipeline) |
-| `allow_spinning` | `1` | Busy-wait thay vì sleep → giảm latency |
-| `set_denormal_as_zero` | `1` | Tránh xử lý số denormal (gần 0) tốn kém |
-| `CUDAExecutionProvider` | ưu tiên đầu | Tự động dùng GPU nếu có CUDA |
+| `execution_mode`           | `ORT_SEQUENTIAL` | Phù hợp model dạng chuỗi (pipeline)                |
+| `allow_spinning`           | `1`              | Busy-wait thay vì sleep → giảm latency             |
+| `set_denormal_as_zero`     | `1`              | Tránh xử lý số denormal (gần 0) tốn kém            |
+| `CUDAExecutionProvider`    | ưu tiên đầu      | Tự động dùng GPU nếu có CUDA                       |
 
 Thứ tự ưu tiên provider: `CUDA` → `CPU`. Nếu không có GPU, tự động fallback về CPU.
