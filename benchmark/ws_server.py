@@ -127,7 +127,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--host", default="127.0.0.1", help="Bind host")
     parser.add_argument("--port", type=int, default=8765, help="Bind port")
     parser.add_argument("--speed", type=float, default=1.0, help="Speech speed")
-    parser.add_argument("--nfe-step", type=int, default=32, help="Number of flow steps")
+    parser.add_argument("--nfe-step", type=int, default=28, help="Number of flow steps")
     parser.add_argument("--fuse-nfe", type=int, default=1, help="Fused NFE steps")
     parser.add_argument("--random-seed", type=int, default=9527, help="Random seed")
     parser.add_argument(
@@ -137,7 +137,7 @@ def parse_args() -> argparse.Namespace:
         "--intra-op-threads", type=int, default=0, help="ORT intra-op threads"
     )
     parser.add_argument(
-        "--chunk-size", type=int, default=32768, help="Chunk size for streaming bytes"
+        "--chunk-size", type=int, default=16384, help="Chunk size for streaming bytes"
     )
     parser.add_argument("--log-level", default="info", help="Uvicorn log level")
     return parser.parse_args()
