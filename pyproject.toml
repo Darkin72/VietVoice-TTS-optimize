@@ -46,6 +46,13 @@ cpu = [
 gpu = [
     "onnxruntime-gpu>=1.15.0",
 ]
+server = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.27.0",
+]
+benchmark = [
+    "websockets>=12.0",
+]
 
 [project.scripts]
 vietvoice-tts = "vietvoicetts.cli:main"
