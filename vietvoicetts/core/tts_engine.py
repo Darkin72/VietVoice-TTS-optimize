@@ -6,7 +6,6 @@ import time
 import numpy as np
 from typing import Tuple, Optional
 from pathlib import Path
-from tqdm import tqdm
 
 from .model_config import ModelConfig
 from .model import ModelSessionManager
@@ -103,13 +102,6 @@ class TTSEngine:
             target_text_len / speaking_rate / self.config.speed,
             self.config.min_target_duration,
         )
-        total_estimated_duration = ref_audio_duration + target_audio_duration
-
-        print(
-            "Server-side chunking disabled. "
-            f"Processing single chunk with estimated total duration {total_estimated_duration:.1f}s "
-            f"(ref: {ref_audio_duration:.1f}s + target: {target_audio_duration:.1f}s)."
-        )
 
         target_audio_samples = int(target_audio_duration * self.config.sample_rate)
         target_audio_len = target_audio_samples // self.config.hop_length + 1
@@ -119,10 +111,6 @@ class TTSEngine:
         text_ids = self.text_processor.text_to_indices(combined_text)
         time_step = np.array([0], dtype=np.int32)
 
-        print(
-            f"Single chunk: {len(target_text)} chars, total duration {total_estimated_duration:.1f}s. "
-            f"Content: {target_text}"
-        )
         return audio, text_ids, max_duration, time_step
 
     def _run_preprocess(
@@ -157,11 +145,7 @@ class TTSEngine:
         input_names = self.model_session_manager.input_names["transformer"]
         output_names = self.model_session_manager.output_names["transformer"]
 
-        for i in tqdm(
-            range(0, self.config.nfe_step - 1, self.config.fuse_nfe),
-            desc="Processing",
-            total=self.config.nfe_step // self.config.fuse_nfe - 1,
-        ):
+        for _ in range(0, self.config.nfe_step - 1, self.config.fuse_nfe):
 
             inputs = {
                 input_names[0]: noise,
@@ -221,7 +205,6 @@ class TTSEngine:
             audio, text_ids, max_duration, time_step = self._prepare_inputs(
                 ref_audio, ref_text, text
             )
-            print("Generating speech for single chunk...")
 
             preprocess_outputs = self._run_preprocess(audio, text_ids, max_duration)
             (

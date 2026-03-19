@@ -182,7 +182,6 @@ class ModelSessionManager:
                 raise FileNotFoundError(
                     f"Reference audio file not found: {reference_audio}"
                 )
-            print(f"Using reference audio and text: {reference_audio}")
             return reference_audio, reference_text
 
         sample = next(
@@ -197,8 +196,6 @@ class ModelSessionManager:
             raise ValueError(
                 f"Hardcoded sample '{HARDCODED_REF_AUDIO_FILENAME}' not found in model metadata"
             )
-
-        print(f"Using hardcoded sample: {HARDCODED_REF_AUDIO_FILENAME}")
 
         file_name = sample["file_name"]
         if file_name in self.sample_audio_cache:
