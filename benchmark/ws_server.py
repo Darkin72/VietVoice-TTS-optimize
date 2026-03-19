@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import AsyncIterator
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -35,6 +35,8 @@ LOCKED_CUDA_CONV_USE_MAX_WORKSPACE = True
 LOCKED_CUDA_COPY_IN_DEFAULT_STREAM = True
 LOCKED_ENABLE_CUDA_GRAPH = False
 LOCKED_CHUNK_SIZE = 16384
+LOCKED_MAX_ACTIVE_WEBSOCKETS = 4
+LOCKED_PER_CLIENT_QUEUE_SIZE = 32
 
 
 def create_app() -> FastAPI:
@@ -52,6 +54,11 @@ def create_app() -> FastAPI:
         enable_cuda_graph=LOCKED_ENABLE_CUDA_GRAPH,
     )
     api = TTSApi(config)
+
+    # Guard shared model state and websocket slot accounting.
+    inference_lock = asyncio.Lock()
+    active_ws_count = 0
+    active_ws_count_lock = asyncio.Lock()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -72,7 +79,7 @@ def create_app() -> FastAPI:
             f"enable_cuda_graph={config.enable_cuda_graph}, "
             f"providers={engine.model_session_manager.providers}"
         )
-        # Run warm-up infer with short/medium/long text so first real request is ready.
+        # Warm-up with short/medium/long text so first real request is ready.
         warmup_texts = (
             "Xin chao.",
             "Xin chao, day la cau warm-up trung binh de khoi tao on dinh runtime.",
@@ -94,49 +101,107 @@ def create_app() -> FastAPI:
 
     @app.websocket("/ws")
     async def ws_infer(websocket: WebSocket) -> None:
+        nonlocal active_ws_count
+
+        has_ws_slot = False
+        async with active_ws_count_lock:
+            if active_ws_count < LOCKED_MAX_ACTIVE_WEBSOCKETS:
+                active_ws_count += 1
+                has_ws_slot = True
+
+        if not has_ws_slot:
+            await websocket.accept()
+            await websocket.send_bytes(b"ERR:too many websocket connections")
+            await websocket.send_bytes(b"")
+            await websocket.close(code=1013)
+            return
+
         await websocket.accept()
+        client_queue: asyncio.Queue[str | None] = asyncio.Queue(
+            maxsize=LOCKED_PER_CLIENT_QUEUE_SIZE
+        )
+        send_lock = asyncio.Lock()
 
-        while True:
-            try:
-                payload = await websocket.receive_bytes()
-            except WebSocketDisconnect:
-                break
+        async def send_frame(data: bytes) -> None:
+            async with send_lock:
+                await websocket.send_bytes(data)
 
-            if not payload:
-                await websocket.send_bytes(b"ERR:empty request")
-                await websocket.send_bytes(b"")
-                continue
+        async def send_error(err_msg: bytes) -> None:
+            await send_frame(err_msg)
+            await send_frame(b"")
 
-            try:
-                text = payload.decode("utf-8").strip()
-            except UnicodeDecodeError:
-                await websocket.send_bytes(
-                    b"ERR:request must be utf-8 encoded text bytes"
+        async def run_inference_locked(text: str) -> tuple[bytes, float]:
+            # Never release inference lock before background inference thread is done.
+            async with inference_lock:
+                infer_task = asyncio.create_task(
+                    asyncio.to_thread(api.synthesize_to_bytes, text)
                 )
-                await websocket.send_bytes(b"")
-                continue
+                try:
+                    return await asyncio.shield(infer_task)
+                except asyncio.CancelledError:
+                    await infer_task
+                    raise
 
-            if not text:
-                await websocket.send_bytes(b"ERR:text is empty")
-                await websocket.send_bytes(b"")
-                continue
+        async def consume_client_queue() -> None:
+            while True:
+                text = await client_queue.get()
+                if text is None:
+                    client_queue.task_done()
+                    break
 
-            try:
-                print(f"Processing text: {text}")
-                wav_bytes, _ = await asyncio.to_thread(api.synthesize_to_bytes, text)
+                try:
+                    print(f"Processing text: {text}")
+                    wav_bytes, _ = await run_inference_locked(text)
 
-                for start in range(0, len(wav_bytes), LOCKED_CHUNK_SIZE):
-                    await websocket.send_bytes(
-                        wav_bytes[start : start + LOCKED_CHUNK_SIZE]
-                    )
+                    for start in range(0, len(wav_bytes), LOCKED_CHUNK_SIZE):
+                        await send_frame(wav_bytes[start : start + LOCKED_CHUNK_SIZE])
 
-                # End-of-response marker
-                await websocket.send_bytes(b"")
+                    # End-of-response marker
+                    await send_frame(b"")
 
-            except Exception as exc:  # pragma: no cover - runtime-dependent
-                err = f"ERR:{exc}".encode("utf-8", errors="replace")
-                await websocket.send_bytes(err)
-                await websocket.send_bytes(b"")
+                except Exception as exc:  # pragma: no cover - runtime-dependent
+                    err = f"ERR:{exc}".encode("utf-8", errors="replace")
+                    with suppress(Exception):
+                        await send_error(err)
+                    break
+                finally:
+                    client_queue.task_done()
+
+        consumer_task = asyncio.create_task(consume_client_queue())
+
+        try:
+            while True:
+                try:
+                    payload = await websocket.receive_bytes()
+                except WebSocketDisconnect:
+                    break
+
+                if not payload:
+                    await send_error(b"ERR:empty request")
+                    continue
+
+                try:
+                    text = payload.decode("utf-8").strip()
+                except UnicodeDecodeError:
+                    await send_error(b"ERR:request must be utf-8 encoded text bytes")
+                    continue
+
+                if not text:
+                    await send_error(b"ERR:text is empty")
+                    continue
+
+                # Queue per client: concurrent messages are buffered and processed in order.
+                await client_queue.put(text)
+
+        finally:
+            if not consumer_task.done():
+                await client_queue.put(None)
+            with suppress(Exception):
+                await consumer_task
+
+            async with active_ws_count_lock:
+                if active_ws_count > 0:
+                    active_ws_count -= 1
 
     return app
 
