@@ -6,7 +6,7 @@ import tarfile
 import tempfile
 import shutil
 from pathlib import Path
-from typing import List, Tuple, Optional, Any
+from typing import List, Tuple, Optional
 import json
 import onnxruntime
 
@@ -34,11 +34,34 @@ class ModelSessionManager:
         """Get the fastest available providers"""
         available_providers = onnxruntime.get_available_providers()
 
-        provider_priority = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        provider_priority = [
+            "TensorRTExecutionProvider",
+            "CUDAExecutionProvider",
+            "CPUExecutionProvider",
+        ]
 
         selected_providers: List[str | tuple[str, dict[str, str]]] = []
         for provider in provider_priority:
-            if provider == "CUDAExecutionProvider" and provider in available_providers:
+            if (
+                provider == "TensorRTExecutionProvider"
+                and provider in available_providers
+                and self.config.enable_tensorrt
+            ):
+                trt_options = {
+                    "device_id": str(self.config.cuda_device_id),
+                    "trt_fp16_enable": "1" if self.config.trt_fp16_enable else "0",
+                    "trt_engine_cache_enable": (
+                        "1" if self.config.trt_engine_cache_enable else "0"
+                    ),
+                    "trt_engine_cache_path": str(
+                        Path(self.config.trt_engine_cache_path).expanduser()
+                    ),
+                    "trt_max_workspace_size": str(self.config.trt_max_workspace_size),
+                }
+                selected_providers.append(("TensorRTExecutionProvider", trt_options))
+            elif (
+                provider == "CUDAExecutionProvider" and provider in available_providers
+            ):
                 cuda_options = {
                     "device_id": str(self.config.cuda_device_id),
                     "arena_extend_strategy": "kNextPowerOfTwo",
@@ -65,6 +88,17 @@ class ModelSessionManager:
             selected_providers.append("CPUExecutionProvider")
 
         return selected_providers
+
+    @staticmethod
+    def _providers_without_tensorrt(
+        providers: List[str | tuple[str, dict[str, str]]],
+    ) -> List[str | tuple[str, dict[str, str]]]:
+        return [
+            p
+            for p in providers
+            if not (isinstance(p, tuple) and p[0] == "TensorRTExecutionProvider")
+            and p != "TensorRTExecutionProvider"
+        ]
 
     def _create_session_options(self) -> onnxruntime.SessionOptions:
         """Create optimized ONNX Runtime session options"""
@@ -110,6 +144,7 @@ class ModelSessionManager:
                 self.sample_metadata = json.load(metadata_file)
 
                 # Load ONNX models
+                active_providers = self.providers
                 for model_name, filename in expected_models.items():
                     matching_member = next(
                         (m for m in tar_members if m.endswith(filename)), None
@@ -127,9 +162,37 @@ class ModelSessionManager:
 
                     model_bytes = extracted_file.read()
                     session_opts = self._create_session_options()
-                    session = onnxruntime.InferenceSession(
-                        model_bytes, sess_options=session_opts, providers=self.providers
-                    )
+                    try:
+                        session = onnxruntime.InferenceSession(
+                            model_bytes,
+                            sess_options=session_opts,
+                            providers=active_providers,
+                        )
+                    except Exception as session_error:
+                        can_retry_without_trt = any(
+                            (
+                                isinstance(p, tuple)
+                                and p[0] == "TensorRTExecutionProvider"
+                            )
+                            or p == "TensorRTExecutionProvider"
+                            for p in active_providers
+                        )
+                        if not can_retry_without_trt:
+                            raise
+
+                        active_providers = self._providers_without_tensorrt(
+                            active_providers
+                        )
+                        print(
+                            "Warning: TensorRT session init failed. "
+                            "Retrying with CUDAExecutionProvider. "
+                            f"Details: {session_error}"
+                        )
+                        session = onnxruntime.InferenceSession(
+                            model_bytes,
+                            sess_options=session_opts,
+                            providers=active_providers,
+                        )
 
                     self.sessions[model_name] = session
                     self.input_names[model_name] = [
@@ -138,6 +201,8 @@ class ModelSessionManager:
                     self.output_names[model_name] = [
                         out.name for out in session.get_outputs()
                     ]
+
+                self.providers = active_providers
 
                 for sample in self.sample_metadata:
                     file_name = sample.get("file_name")

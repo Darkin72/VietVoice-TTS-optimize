@@ -70,6 +70,11 @@ def create_app() -> FastAPI:
             f"cuda_conv_use_max_workspace={config.cuda_conv_use_max_workspace}, "
             f"cuda_copy_in_default_stream={config.cuda_copy_in_default_stream}, "
             f"enable_cuda_graph={config.enable_cuda_graph}, "
+            f"enable_tensorrt={config.enable_tensorrt}, "
+            f"trt_fp16_enable={config.trt_fp16_enable}, "
+            f"trt_engine_cache_enable={config.trt_engine_cache_enable}, "
+            f"trt_engine_cache_path={config.trt_engine_cache_path}, "
+            f"trt_max_workspace_size={config.trt_max_workspace_size}, "
             f"providers={engine.model_session_manager.providers}"
         )
         # Run warm-up infer with short/medium/long text so first real request is ready.

@@ -55,6 +55,11 @@ class ModelConfig:
     cuda_conv_use_max_workspace: bool = True
     cuda_copy_in_default_stream: bool = True
     enable_cuda_graph: bool = False
+    enable_tensorrt: bool = True
+    trt_fp16_enable: bool = True
+    trt_engine_cache_enable: bool = True
+    trt_engine_cache_path: str = "~/.cache/vietvoicetts/trt_cache"
+    trt_max_workspace_size: int = 2147483648
 
     def __post_init__(self):
         """Post-initialization validation"""
