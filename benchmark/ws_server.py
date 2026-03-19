@@ -29,6 +29,11 @@ def create_app(
     random_seed: int = 9527,
     inter_op_threads: int = 0,
     intra_op_threads: int = 0,
+    cuda_device_id: int = 0,
+    cuda_conv_algo_search: str = "HEURISTIC",
+    cuda_conv_use_max_workspace: bool = True,
+    cuda_copy_in_default_stream: bool = True,
+    enable_cuda_graph: bool = False,
     chunk_size: int = 16384,
 ) -> FastAPI:
     config = ModelConfig(
@@ -38,6 +43,11 @@ def create_app(
         random_seed=random_seed,
         inter_op_num_threads=inter_op_threads,
         intra_op_num_threads=intra_op_threads,
+        cuda_device_id=cuda_device_id,
+        cuda_conv_algo_search=cuda_conv_algo_search,
+        cuda_conv_use_max_workspace=cuda_conv_use_max_workspace,
+        cuda_copy_in_default_stream=cuda_copy_in_default_stream,
+        enable_cuda_graph=enable_cuda_graph,
     )
     api = TTSApi(config)
 
@@ -53,6 +63,11 @@ def create_app(
             f"sample_rate={config.sample_rate}, "
             f"inter_op_threads={config.inter_op_num_threads}, "
             f"intra_op_threads={config.intra_op_num_threads}, "
+            f"cuda_device_id={config.cuda_device_id}, "
+            f"cuda_conv_algo_search={config.cuda_conv_algo_search}, "
+            f"cuda_conv_use_max_workspace={config.cuda_conv_use_max_workspace}, "
+            f"cuda_copy_in_default_stream={config.cuda_copy_in_default_stream}, "
+            f"enable_cuda_graph={config.enable_cuda_graph}, "
             f"providers={engine.model_session_manager.providers}"
         )
         # Run warm-up infer with short/medium/long text so first real request is ready.
@@ -136,6 +151,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--intra-op-threads", type=int, default=0, help="ORT intra-op threads"
     )
+    parser.add_argument("--cuda-device-id", type=int, default=0, help="CUDA device id")
+    parser.add_argument(
+        "--cuda-conv-algo-search",
+        choices=["HEURISTIC", "EXHAUSTIVE", "DEFAULT"],
+        default="HEURISTIC",
+        help="cuDNN convolution algorithm search mode",
+    )
+    parser.add_argument(
+        "--disable-cuda-max-workspace",
+        action="store_true",
+        help="Disable cuDNN max workspace for CUDAExecutionProvider",
+    )
+    parser.add_argument(
+        "--disable-cuda-copy-in-default-stream",
+        action="store_true",
+        help="Disable copy in default stream for CUDAExecutionProvider",
+    )
+    parser.add_argument(
+        "--enable-cuda-graph",
+        action="store_true",
+        help="Enable CUDA graph in CUDAExecutionProvider (if supported)",
+    )
     parser.add_argument(
         "--chunk-size", type=int, default=16384, help="Chunk size for streaming bytes"
     )
@@ -153,6 +190,11 @@ def main() -> None:
         random_seed=args.random_seed,
         inter_op_threads=args.inter_op_threads,
         intra_op_threads=args.intra_op_threads,
+        cuda_device_id=args.cuda_device_id,
+        cuda_conv_algo_search=args.cuda_conv_algo_search,
+        cuda_conv_use_max_workspace=not args.disable_cuda_max_workspace,
+        cuda_copy_in_default_stream=not args.disable_cuda_copy_in_default_stream,
+        enable_cuda_graph=args.enable_cuda_graph,
         chunk_size=args.chunk_size,
     )
 

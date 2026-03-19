@@ -6,7 +6,7 @@ import tarfile
 import tempfile
 import shutil
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Any
 import json
 import onnxruntime
 
@@ -30,18 +30,38 @@ class ModelSessionManager:
         self.temp_dir = None
         self.vocab_path = None
 
-    def _get_optimal_providers(self) -> List[str]:
+    def _get_optimal_providers(self) -> List[str | tuple[str, dict[str, str]]]:
         """Get the fastest available providers"""
         available_providers = onnxruntime.get_available_providers()
 
         provider_priority = ["CUDAExecutionProvider", "CPUExecutionProvider"]
 
-        selected_providers = []
+        selected_providers: List[str | tuple[str, dict[str, str]]] = []
         for provider in provider_priority:
-            if provider in available_providers:
-                selected_providers.append(provider)
+            if provider == "CUDAExecutionProvider" and provider in available_providers:
+                cuda_options = {
+                    "device_id": str(self.config.cuda_device_id),
+                    "arena_extend_strategy": "kNextPowerOfTwo",
+                    "cudnn_conv_algo_search": self.config.cuda_conv_algo_search,
+                    "do_copy_in_default_stream": (
+                        "1" if self.config.cuda_copy_in_default_stream else "0"
+                    ),
+                    "cudnn_conv_use_max_workspace": (
+                        "1" if self.config.cuda_conv_use_max_workspace else "0"
+                    ),
+                }
+                if self.config.enable_cuda_graph:
+                    cuda_options["enable_cuda_graph"] = "1"
+                selected_providers.append(("CUDAExecutionProvider", cuda_options))
+            elif provider == "CPUExecutionProvider" and provider in available_providers:
+                selected_providers.append("CPUExecutionProvider")
 
-        if "CPUExecutionProvider" not in selected_providers:
+        has_cpu_provider = any(
+            p == "CPUExecutionProvider"
+            or (isinstance(p, tuple) and p[0] == "CPUExecutionProvider")
+            for p in selected_providers
+        )
+        if not has_cpu_provider:
             selected_providers.append("CPUExecutionProvider")
 
         return selected_providers

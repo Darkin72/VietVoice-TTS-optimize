@@ -50,6 +50,11 @@ class ModelConfig:
     inter_op_num_threads: int = 0
     intra_op_num_threads: int = 0
     enable_cpu_mem_arena: bool = True
+    cuda_device_id: int = 0
+    cuda_conv_algo_search: str = "HEURISTIC"
+    cuda_conv_use_max_workspace: bool = True
+    cuda_copy_in_default_stream: bool = True
+    enable_cuda_graph: bool = False
 
     def __post_init__(self):
         """Post-initialization validation"""
