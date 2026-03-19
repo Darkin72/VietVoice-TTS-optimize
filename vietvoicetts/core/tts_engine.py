@@ -5,6 +5,7 @@ TTS Engine - Main speech synthesis engine
 import time
 import numpy as np
 from typing import Tuple, Optional
+from pathlib import Path
 from tqdm import tqdm
 
 from .model_config import ModelConfig
@@ -28,8 +29,37 @@ class TTSEngine:
         self.audio_processor = AudioProcessor()
         self.sample_cache = {}
 
+    def _get_cached_audio(
+        self, reference_audio_path_or_bytes: str | bytes
+    ) -> np.ndarray:
+        """Load reference audio once and reuse decoded waveform from RAM cache."""
+        if isinstance(reference_audio_path_or_bytes, str):
+            p = Path(reference_audio_path_or_bytes)
+            key = (
+                "path",
+                str(p.resolve()),
+                p.stat().st_mtime_ns,
+                self.config.sample_rate,
+            )
+        else:
+            key = (
+                "bytes",
+                hash(reference_audio_path_or_bytes),
+                len(reference_audio_path_or_bytes),
+                self.config.sample_rate,
+            )
+
+        cached_audio = self.sample_cache.get(key)
+        if cached_audio is None:
+            cached_audio = self.audio_processor.load_audio(
+                reference_audio_path_or_bytes, self.config.sample_rate
+            )
+            self.sample_cache[key] = cached_audio
+        return cached_audio.copy()
+
     def cleanup(self) -> None:
         """Clean up resources"""
+        self.sample_cache.clear()
         if self.model_session_manager:
             self.model_session_manager.cleanup()
 
@@ -40,12 +70,13 @@ class TTSEngine:
         self.cleanup()
 
     def _prepare_inputs(
-        self, reference_audio_path_or_bytes: str, reference_text: str, target_text: str
+        self,
+        reference_audio_path_or_bytes: str | bytes,
+        reference_text: str,
+        target_text: str,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Prepare single-pass inputs for inference."""
-        audio = self.audio_processor.load_audio(
-            reference_audio_path_or_bytes, self.config.sample_rate
-        )
+        audio = self._get_cached_audio(reference_audio_path_or_bytes)
         audio = audio.reshape(1, 1, -1)
 
         # Clean text
