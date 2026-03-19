@@ -24,12 +24,12 @@ from vietvoicetts import ModelConfig, TTSApi
 
 def create_app(
     speed: float = 1.0,
-    nfe_step: int = 32,
+    nfe_step: int = 28,
     fuse_nfe: int = 1,
     random_seed: int = 9527,
     inter_op_threads: int = 0,
     intra_op_threads: int = 0,
-    chunk_size: int = 32768,
+    chunk_size: int = 16384,
 ) -> FastAPI:
     config = ModelConfig(
         speed=speed,
