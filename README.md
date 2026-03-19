@@ -73,19 +73,22 @@ Neu loi:
 Benchmark chi bat dau khi websocket connect thanh cong.
 
 ```bash
-python benchmark/ws_benchmark.py \
-  --url ws://127.0.0.1:8765/ws \
-  --min-words 3 \
-  --max-words 100 \
-  --samples-per-length 2 \
-  --output-csv benchmark/ws_benchmark_results.csv
+python benchmark/ws_benchmark.py
 ```
 
 Mac dinh benchmark se:
 
-- Tao danh sach text tu 3 den 100 tu
-- Moi do dai co `samples-per-length` cau
-- Gui lan luot tung query tren cung websocket connection
+- Ket noi den `ws://127.0.0.1:8765/ws`
+- Dung danh sach hardcode gom 50 cau tieng Viet co dau cau, sap xep tu ngan den dai
+- Gui lan luot tung query tren cung websocket connection de dam bao tinh nhat quan
+- Luu ket qua chi tiet vao `benchmark/ws_benchmark_results.csv`
+- Luu audio cua cau dai nhat thanh cong vao `benchmark/ws_longest_query.wav`
+- Luu noi dung cau dai nhat vao `benchmark/ws_longest_query.txt`
+
+Luu y:
+
+- Benchmark client da hardcode du lieu va duong dan output de ket qua on dinh giua cac lan chay.
+- Script yeu cau dung 50 cau; neu so luong cau bi thay doi, script se bao loi som.
 
 ## 6) Metric benchmark
 

@@ -9,135 +9,76 @@ Benchmark flow:
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import csv
 import io
-import random
+from pathlib import Path
 import statistics
 import time
 import wave
 from dataclasses import dataclass, asdict
-from typing import List, Sequence
+from typing import List, Sequence, Tuple
 
 import websockets
 
 
-VI_WORDS: Sequence[str] = (
-    "xin",
-    "chao",
-    "tat",
-    "ca",
-    "cac",
-    "ban",
-    "toi",
-    "la",
-    "mot",
-    "he",
-    "thong",
-    "tong",
-    "hop",
-    "giong",
-    "noi",
-    "tieng",
-    "viet",
-    "chat",
-    "luong",
-    "cao",
-    "nhanh",
-    "on",
-    "dinh",
-    "du",
-    "lieu",
-    "tham",
-    "chieu",
-    "am",
-    "thanh",
-    "van",
-    "ban",
-    "noi",
-    "dung",
-    "benchmark",
-    "thu",
-    "nghiem",
-    "hieu",
-    "nang",
-    "do",
-    "latency",
-    "throughput",
-    "thoi",
-    "gian",
-    "phan",
-    "hoi",
-    "dau",
-    "tien",
-    "tong",
-    "thoi",
-    "gian",
-    "xu",
-    "ly",
-    "server",
-    "client",
-    "websocket",
-    "mo",
-    "hinh",
-    "onnx",
-    "runtime",
-    "pipeline",
-    "chunk",
-    "cross",
-    "fade",
-    "toc",
-    "do",
-    "doc",
-    "tu",
-    "nhien",
-    "de",
-    "nghe",
-    "ro",
-    "rang",
-    "chinh",
-    "xac",
-    "nhe",
-    "nhang",
-    "mang",
-    "internet",
-    "truyen",
-    "tai",
-    "goi",
-    "du",
-    "lieu",
-    "moi",
-    "lan",
-    "kiem",
-    "tra",
-    "gia",
-    "tri",
-    "trung",
-    "binh",
-    "phuong",
-    "sai",
-    "chuan",
-    "tuong",
-    "doi",
-    "khung",
-    "mau",
-    "tan",
-    "so",
-    "hai",
-    "muoi",
-    "bon",
-    "nghin",
-    "phu",
-    "hop",
-    "ung",
-    "dung",
-    "thuc",
-    "te",
-    "san",
-    "sang",
-    "trien",
-    "khai",
+WS_URL = "ws://127.0.0.1:8765/ws"
+OUTPUT_CSV = "benchmark/ws_benchmark_results.csv"
+OUTPUT_AUDIO = "benchmark/ws_longest_query.wav"
+OUTPUT_LONGEST_TEXT = "benchmark/ws_longest_query.txt"
+
+# 50 câu tiếng Việt có dấu, sắp xếp từ ngắn đến dài để benchmark nhất quán.
+BENCHMARK_TEXTS: Sequence[str] = (
+    "Xin chào.",
+    "Tôi đang thử.",
+    "Đây là bài đo.",
+    "Bạn nghe rõ chứ?",
+    "Máy chủ đã sẵn sàng.",
+    "Âm thanh đầu ra ổn định.",
+    "Tôi gửi thêm một câu ngắn.",
+    "Hệ thống phản hồi khá nhanh.",
+    "Đoạn này dùng để kiểm tra.",
+    "Chất giọng hiện tại nghe tự nhiên.",
+    "Chúng ta bắt đầu chạy benchmark nhé.",
+    "Mỗi truy vấn sẽ được đo độ trễ.",
+    "Tôi muốn kiểm tra cả tốc độ đọc.",
+    "Câu này có dấu phẩy, nghe mượt hơn.",
+    "Dữ liệu đầu vào cần rõ nghĩa và sạch.",
+    "Kết quả tốt phải ổn định qua nhiều lần.",
+    "Máy khách sẽ ghi nhận thời gian phản hồi đầu tiên.",
+    "Sau đó chương trình tính tổng thời gian xử lý toàn bộ.",
+    "Nếu mạng dao động, thông lượng có thể giảm nhẹ theo thời điểm.",
+    "Chúng tôi vẫn ưu tiên giọng đọc rõ ràng hơn tốc độ tuyệt đối.",
+    "Câu kiểm thử này được viết để nghe tự nhiên trong ngữ cảnh thực tế.",
+    "Bạn có thể mở file âm thanh sau khi chạy xong để tự đánh giá nhanh.",
+    "Trong báo cáo, chỉ số TTFB giúp quan sát độ trễ phản hồi ban đầu.",
+    "Chỉ số tổng thời gian sẽ phản ánh mức độ ổn định của pipeline tổng hợp.",
+    "Nếu một truy vấn lỗi, hệ thống vẫn cần đồng bộ luồng dữ liệu đến cuối.",
+    "Câu này dài hơn một chút để kiểm tra cách mô hình xử lý nhịp ngắt tự nhiên.",
+    "Khi câu văn có đủ dấu câu, nhịp điệu phát âm thường mềm mại và dễ nghe hơn.",
+    "Bản benchmark cố ý dùng nội dung rõ ràng để hạn chế sai lệch do từ vô nghĩa gây ra.",
+    "Trong thực tế triển khai, độ trễ ổn định thường quan trọng không kém chất lượng phát âm.",
+    "Sau mỗi lượt chạy, chúng ta cần lưu log chi tiết để tiện so sánh giữa các phiên bản mô hình.",
+    "Nếu âm đầu ra bị méo hoặc hụt hơi, cần kiểm tra lại tiền xử lý văn bản và chuẩn hóa dấu câu.",
+    "Đoạn văn này được thiết kế để nghe như lời nói tự nhiên, không phải chuỗi từ ghép ngẫu nhiên.",
+    "Một hệ thống TTS tốt phải cân bằng giữa độ rõ, độ tự nhiên, tốc độ phản hồi và mức dùng tài nguyên.",
+    "Khi tăng độ dài câu, chúng ta sẽ quan sát xem thời gian xử lý tăng tuyến tính hay có điểm nghẽn bất thường.",
+    "Để đảm bảo nhất quán, toàn bộ danh sách câu được hardcode thay vì sinh ngẫu nhiên theo từng lần chạy.",
+    "Câu benchmark này có cấu trúc đầy đủ chủ ngữ và vị ngữ, giúp mô hình đọc đúng nhịp điệu hơn đáng kể.",
+    "Ngoài tốc độ, người dùng cuối thường quan tâm chất lượng giọng đọc có tự nhiên, rõ chữ và dễ nghe hay không.",
+    "Nếu cần phân tích sâu hơn, bạn có thể đối chiếu thêm thời lượng audio thực tế với tổng thời gian xử lý hệ thống.",
+    "Trong môi trường mạng không ổn định, việc theo dõi thông lượng trung bình theo từng truy vấn là rất cần thiết.",
+    "Chúng tôi lưu riêng câu dài nhất để nghe kiểm định, vì đoạn dài thường bộc lộ lỗi nhịp ngắt rõ ràng nhất.",
+    "Bài đo này giả lập kịch bản người dùng gửi liên tục nhiều câu với độ dài tăng dần từ ngắn đến dài rõ rệt.",
+    "Khi chỉ số RTF nhỏ hơn một, mô hình thường có khả năng tổng hợp nhanh hơn tốc độ phát lại âm thanh thực tế.",
+    "Nếu bạn thấy phát âm chưa chuẩn ở một số từ, hãy rà soát bộ từ điển, chuẩn hóa văn bản và bộ tiền xử lý đầu vào.",
+    "Bằng cách dùng các câu có nghĩa và đầy đủ dấu câu, kết quả benchmark sẽ phản ánh đúng chất lượng sử dụng ngoài đời.",
+    "Mỗi câu trong danh sách được viết có chủ đích để bao phủ nhiều mẫu ngữ điệu, từ câu trần thuật ngắn đến câu dài phức hợp.",
+    "Trong giai đoạn tối ưu, chúng ta nên giữ nguyên dữ liệu benchmark cố định để mọi thay đổi hiệu năng đều có thể so sánh công bằng.",
+    "Nếu một bản cập nhật giúp giảm TTFB nhưng làm giọng đọc kém tự nhiên, quyết định triển khai cần cân nhắc theo ưu tiên sản phẩm.",
+    "Kết quả đáng tin cậy không chỉ đến từ một lần chạy, mà còn từ việc lặp lại cùng dữ liệu chuẩn và theo dõi xu hướng qua thời gian.",
+    "Câu dài áp chót này được thêm để kiểm tra khả năng duy trì chất lượng phát âm khi văn bản tăng dần độ phức tạp theo nhiều mệnh đề.",
+    "Câu dài nhất trong bộ benchmark được dùng để lưu lại âm thanh kiểm định cuối cùng, giúp bạn nghe trực tiếp và đánh giá toàn diện độ tự nhiên, độ rõ chữ, nhịp ngắt, cũng như tính ổn định của hệ thống tổng hợp tiếng nói.",
 )
 
 
@@ -180,25 +121,11 @@ def wav_duration_seconds(wav_bytes: bytes) -> float:
         return 0.0
 
 
-def generate_texts(
-    min_words: int,
-    max_words: int,
-    samples_per_length: int,
-    seed: int,
-) -> List[str]:
-    rnd = random.Random(seed)
-    texts: List[str] = []
-    for n in range(min_words, max_words + 1):
-        for _ in range(samples_per_length):
-            words = [rnd.choice(VI_WORDS) for _ in range(n)]
-            sentence = " ".join(words)
-            sentence = sentence.capitalize() + "."
-            texts.append(sentence)
-    rnd.shuffle(texts)
-    return texts
+def generate_texts() -> List[str]:
+    return list(BENCHMARK_TEXTS)
 
 
-async def run_single_query(ws, index: int, text: str) -> QueryResult:
+async def run_single_query(ws, index: int, text: str) -> Tuple[QueryResult, bytes]:
     req = text.encode("utf-8")
 
     start = time.perf_counter()
@@ -243,18 +170,21 @@ async def run_single_query(ws, index: int, text: str) -> QueryResult:
     audio_duration = wav_duration_seconds(wav_bytes)
     rtf = (total_ms / 1000.0) / audio_duration if audio_duration > 0 else 0.0
 
-    return QueryResult(
-        index=index,
-        words=len(text.split()),
-        request_bytes=len(req),
-        response_bytes=resp_bytes,
-        ttfb_ms=ttfb_ms,
-        total_ms=total_ms,
-        throughput_kib_s=throughput,
-        audio_duration_s=audio_duration,
-        rtf=rtf,
-        ok=(error == ""),
-        error=error,
+    return (
+        QueryResult(
+            index=index,
+            words=len(text.split()),
+            request_bytes=len(req),
+            response_bytes=resp_bytes,
+            ttfb_ms=ttfb_ms,
+            total_ms=total_ms,
+            throughput_kib_s=throughput,
+            audio_duration_s=audio_duration,
+            rtf=rtf,
+            ok=(error == ""),
+            error=error,
+        ),
+        wav_bytes,
     )
 
 
@@ -308,28 +238,44 @@ def save_csv(path: str, results: List[QueryResult]) -> None:
             writer.writerow(asdict(row))
 
 
-async def run_benchmark(args: argparse.Namespace) -> int:
-    texts = generate_texts(
-        min_words=args.min_words,
-        max_words=args.max_words,
-        samples_per_length=args.samples_per_length,
-        seed=args.seed,
-    )
+def save_audio(path: str, audio_bytes: bytes) -> None:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(audio_bytes)
 
-    print(
-        f"Prepared {len(texts)} queries (word range: {args.min_words}-{args.max_words})."
-    )
-    print(f"Connecting to: {args.url}")
+
+def save_text(path: str, content: str) -> None:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(content, encoding="utf-8")
+
+
+async def run_benchmark() -> int:
+    texts = generate_texts()
+
+    if len(texts) != 50:
+        raise ValueError(f"Expected exactly 50 benchmark sentences, got {len(texts)}")
+
+    print(f"Prepared {len(texts)} hardcoded queries (short to long).")
+    print(f"Connecting to: {WS_URL}")
 
     try:
-        async with websockets.connect(args.url, max_size=None) as ws:
+        async with websockets.connect(WS_URL, max_size=None) as ws:
             print("WebSocket connected. Benchmark starts now.")
 
             results: List[QueryResult] = []
+            longest_success_words = -1
+            longest_success_audio = b""
+            longest_success_text = ""
 
             for idx, text in enumerate(texts, start=1):
-                result = await run_single_query(ws, idx, text)
+                result, wav_bytes = await run_single_query(ws, idx, text)
                 results.append(result)
+
+                if result.ok and wav_bytes and result.words > longest_success_words:
+                    longest_success_words = result.words
+                    longest_success_audio = wav_bytes
+                    longest_success_text = text
 
                 status = "OK" if result.ok else f"FAIL ({result.error})"
                 print(
@@ -340,9 +286,21 @@ async def run_benchmark(args: argparse.Namespace) -> int:
 
             summarize_results(results)
 
-            if args.output_csv:
-                save_csv(args.output_csv, results)
-                print(f"\nSaved per-query results to: {args.output_csv}")
+            save_csv(OUTPUT_CSV, results)
+            print(f"\nSaved per-query results to: {OUTPUT_CSV}")
+
+            if longest_success_audio:
+                save_audio(OUTPUT_AUDIO, longest_success_audio)
+                save_text(OUTPUT_LONGEST_TEXT, longest_success_text)
+                print(
+                    "Saved longest-query audio "
+                    f"({longest_success_words} words) to: {OUTPUT_AUDIO}"
+                )
+                print(f"Saved longest query text to: {OUTPUT_LONGEST_TEXT}")
+            else:
+                print(
+                    "Did not save longest-query audio because no successful WAV was produced."
+                )
 
             return 0
 
@@ -351,39 +309,8 @@ async def run_benchmark(args: argparse.Namespace) -> int:
         return 1
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Benchmark VietVoice TTS websocket server"
-    )
-    parser.add_argument("--url", default="ws://127.0.0.1:8765/ws", help="WebSocket URL")
-    parser.add_argument(
-        "--min-words", type=int, default=3, help="Minimum words per query"
-    )
-    parser.add_argument(
-        "--max-words", type=int, default=100, help="Maximum words per query"
-    )
-    parser.add_argument(
-        "--samples-per-length", type=int, default=2, help="Queries per each word length"
-    )
-    parser.add_argument("--seed", type=int, default=20260319, help="Random seed")
-    parser.add_argument(
-        "--output-csv",
-        default="benchmark/ws_benchmark_results.csv",
-        help="CSV result path",
-    )
-    return parser.parse_args()
-
-
 def main() -> None:
-    args = parse_args()
-    if args.min_words < 1:
-        raise ValueError("--min-words must be >= 1")
-    if args.max_words < args.min_words:
-        raise ValueError("--max-words must be >= --min-words")
-    if args.samples_per_length < 1:
-        raise ValueError("--samples-per-length must be >= 1")
-
-    raise_code = asyncio.run(run_benchmark(args))
+    raise_code = asyncio.run(run_benchmark())
     raise SystemExit(raise_code)
 
 
