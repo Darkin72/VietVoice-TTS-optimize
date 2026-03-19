@@ -88,6 +88,7 @@ def create_app(
                 continue
 
             try:
+                print(f"Processing text: {text}")
                 wav_bytes, _ = await asyncio.to_thread(api.synthesize_to_bytes, text)
 
                 for start in range(0, len(wav_bytes), chunk_size):
