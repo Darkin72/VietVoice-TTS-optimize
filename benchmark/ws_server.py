@@ -22,32 +22,34 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from vietvoicetts import ModelConfig, TTSApi
 
 
-def create_app(
-    speed: float = 1.0,
-    nfe_step: int = 28,
-    fuse_nfe: int = 1,
-    random_seed: int = 9527,
-    inter_op_threads: int = 0,
-    intra_op_threads: int = 0,
-    cuda_device_id: int = 0,
-    cuda_conv_algo_search: str = "HEURISTIC",
-    cuda_conv_use_max_workspace: bool = True,
-    cuda_copy_in_default_stream: bool = True,
-    enable_cuda_graph: bool = False,
-    chunk_size: int = 16384,
-) -> FastAPI:
+# Locked production profile (A100/H100) for stable latency/quality.
+LOCKED_SPEED = 1.0
+LOCKED_NFE_STEP = 28
+LOCKED_FUSE_NFE = 1
+LOCKED_RANDOM_SEED = 9527
+LOCKED_INTER_OP_THREADS = 0
+LOCKED_INTRA_OP_THREADS = 0
+LOCKED_CUDA_DEVICE_ID = 0
+LOCKED_CUDA_CONV_ALGO_SEARCH = "HEURISTIC"
+LOCKED_CUDA_CONV_USE_MAX_WORKSPACE = True
+LOCKED_CUDA_COPY_IN_DEFAULT_STREAM = True
+LOCKED_ENABLE_CUDA_GRAPH = False
+LOCKED_CHUNK_SIZE = 16384
+
+
+def create_app() -> FastAPI:
     config = ModelConfig(
-        speed=speed,
-        nfe_step=nfe_step,
-        fuse_nfe=fuse_nfe,
-        random_seed=random_seed,
-        inter_op_num_threads=inter_op_threads,
-        intra_op_num_threads=intra_op_threads,
-        cuda_device_id=cuda_device_id,
-        cuda_conv_algo_search=cuda_conv_algo_search,
-        cuda_conv_use_max_workspace=cuda_conv_use_max_workspace,
-        cuda_copy_in_default_stream=cuda_copy_in_default_stream,
-        enable_cuda_graph=enable_cuda_graph,
+        speed=LOCKED_SPEED,
+        nfe_step=LOCKED_NFE_STEP,
+        fuse_nfe=LOCKED_FUSE_NFE,
+        random_seed=LOCKED_RANDOM_SEED,
+        inter_op_num_threads=LOCKED_INTER_OP_THREADS,
+        intra_op_num_threads=LOCKED_INTRA_OP_THREADS,
+        cuda_device_id=LOCKED_CUDA_DEVICE_ID,
+        cuda_conv_algo_search=LOCKED_CUDA_CONV_ALGO_SEARCH,
+        cuda_conv_use_max_workspace=LOCKED_CUDA_CONV_USE_MAX_WORKSPACE,
+        cuda_copy_in_default_stream=LOCKED_CUDA_COPY_IN_DEFAULT_STREAM,
+        enable_cuda_graph=LOCKED_ENABLE_CUDA_GRAPH,
     )
     api = TTSApi(config)
 
@@ -123,8 +125,10 @@ def create_app(
                 print(f"Processing text: {text}")
                 wav_bytes, _ = await asyncio.to_thread(api.synthesize_to_bytes, text)
 
-                for start in range(0, len(wav_bytes), chunk_size):
-                    await websocket.send_bytes(wav_bytes[start : start + chunk_size])
+                for start in range(0, len(wav_bytes), LOCKED_CHUNK_SIZE):
+                    await websocket.send_bytes(
+                        wav_bytes[start : start + LOCKED_CHUNK_SIZE]
+                    )
 
                 # End-of-response marker
                 await websocket.send_bytes(b"")
@@ -141,41 +145,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run VietVoice TTS WebSocket server")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host")
     parser.add_argument("--port", type=int, default=8765, help="Bind port")
-    parser.add_argument("--speed", type=float, default=1.0, help="Speech speed")
-    parser.add_argument("--nfe-step", type=int, default=28, help="Number of flow steps")
-    parser.add_argument("--fuse-nfe", type=int, default=1, help="Fused NFE steps")
-    parser.add_argument("--random-seed", type=int, default=9527, help="Random seed")
-    parser.add_argument(
-        "--inter-op-threads", type=int, default=0, help="ORT inter-op threads"
-    )
-    parser.add_argument(
-        "--intra-op-threads", type=int, default=0, help="ORT intra-op threads"
-    )
-    parser.add_argument("--cuda-device-id", type=int, default=0, help="CUDA device id")
-    parser.add_argument(
-        "--cuda-conv-algo-search",
-        choices=["HEURISTIC", "EXHAUSTIVE", "DEFAULT"],
-        default="HEURISTIC",
-        help="cuDNN convolution algorithm search mode",
-    )
-    parser.add_argument(
-        "--disable-cuda-max-workspace",
-        action="store_true",
-        help="Disable cuDNN max workspace for CUDAExecutionProvider",
-    )
-    parser.add_argument(
-        "--disable-cuda-copy-in-default-stream",
-        action="store_true",
-        help="Disable copy in default stream for CUDAExecutionProvider",
-    )
-    parser.add_argument(
-        "--enable-cuda-graph",
-        action="store_true",
-        help="Enable CUDA graph in CUDAExecutionProvider (if supported)",
-    )
-    parser.add_argument(
-        "--chunk-size", type=int, default=16384, help="Chunk size for streaming bytes"
-    )
     parser.add_argument("--log-level", default="info", help="Uvicorn log level")
     return parser.parse_args()
 
@@ -183,20 +152,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    app = create_app(
-        speed=args.speed,
-        nfe_step=args.nfe_step,
-        fuse_nfe=args.fuse_nfe,
-        random_seed=args.random_seed,
-        inter_op_threads=args.inter_op_threads,
-        intra_op_threads=args.intra_op_threads,
-        cuda_device_id=args.cuda_device_id,
-        cuda_conv_algo_search=args.cuda_conv_algo_search,
-        cuda_conv_use_max_workspace=not args.disable_cuda_max_workspace,
-        cuda_copy_in_default_stream=not args.disable_cuda_copy_in_default_stream,
-        enable_cuda_graph=args.enable_cuda_graph,
-        chunk_size=args.chunk_size,
-    )
+    app = create_app()
 
     import uvicorn
 
