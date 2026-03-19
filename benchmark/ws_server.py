@@ -44,7 +44,17 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         # Preload model/session at startup.
-        _ = api.engine
+        engine = api.engine
+        print(
+            "Model config: "
+            f"nfe_step={config.nfe_step}, "
+            f"fuse_nfe={config.fuse_nfe}, "
+            f"speed={config.speed}, "
+            f"sample_rate={config.sample_rate}, "
+            f"inter_op_threads={config.inter_op_num_threads}, "
+            f"intra_op_threads={config.intra_op_num_threads}, "
+            f"providers={engine.model_session_manager.providers}"
+        )
         # Run warm-up infer with short/medium/long text so first real request is ready.
         warmup_texts = (
             "Xin chao.",
