@@ -34,51 +34,58 @@ LOCKED_CUDA_CONV_ALGO_SEARCH = "HEURISTIC"
 LOCKED_CUDA_CONV_USE_MAX_WORKSPACE = True
 LOCKED_CUDA_COPY_IN_DEFAULT_STREAM = True
 LOCKED_ENABLE_CUDA_GRAPH = False
+LOCKED_ENGINE_COUNT = 4
 LOCKED_CHUNK_SIZE = 16384
-LOCKED_MAX_ACTIVE_WEBSOCKETS = 4
+LOCKED_MAX_ACTIVE_WEBSOCKETS = LOCKED_ENGINE_COUNT
 LOCKED_PER_CLIENT_QUEUE_SIZE = 32
 
 
 def create_app() -> FastAPI:
-    config = ModelConfig(
-        speed=LOCKED_SPEED,
-        nfe_step=LOCKED_NFE_STEP,
-        fuse_nfe=LOCKED_FUSE_NFE,
-        random_seed=LOCKED_RANDOM_SEED,
-        inter_op_num_threads=LOCKED_INTER_OP_THREADS,
-        intra_op_num_threads=LOCKED_INTRA_OP_THREADS,
-        cuda_device_id=LOCKED_CUDA_DEVICE_ID,
-        cuda_conv_algo_search=LOCKED_CUDA_CONV_ALGO_SEARCH,
-        cuda_conv_use_max_workspace=LOCKED_CUDA_CONV_USE_MAX_WORKSPACE,
-        cuda_copy_in_default_stream=LOCKED_CUDA_COPY_IN_DEFAULT_STREAM,
-        enable_cuda_graph=LOCKED_ENABLE_CUDA_GRAPH,
-    )
-    api = TTSApi(config)
+    def build_model_config() -> ModelConfig:
+        return ModelConfig(
+            speed=LOCKED_SPEED,
+            nfe_step=LOCKED_NFE_STEP,
+            fuse_nfe=LOCKED_FUSE_NFE,
+            random_seed=LOCKED_RANDOM_SEED,
+            inter_op_num_threads=LOCKED_INTER_OP_THREADS,
+            intra_op_num_threads=LOCKED_INTRA_OP_THREADS,
+            cuda_device_id=LOCKED_CUDA_DEVICE_ID,
+            cuda_conv_algo_search=LOCKED_CUDA_CONV_ALGO_SEARCH,
+            cuda_conv_use_max_workspace=LOCKED_CUDA_CONV_USE_MAX_WORKSPACE,
+            cuda_copy_in_default_stream=LOCKED_CUDA_COPY_IN_DEFAULT_STREAM,
+            enable_cuda_graph=LOCKED_ENABLE_CUDA_GRAPH,
+        )
 
-    # Guard shared model state and websocket slot accounting.
-    inference_lock = asyncio.Lock()
+    engine_apis = [TTSApi(build_model_config()) for _ in range(LOCKED_ENGINE_COUNT)]
+    engine_inference_locks = [asyncio.Lock() for _ in range(LOCKED_ENGINE_COUNT)]
+
+    # Guard websocket slot accounting and engine assignment.
     active_ws_count = 0
-    active_ws_count_lock = asyncio.Lock()
+    engine_ws_counts = [0 for _ in range(LOCKED_ENGINE_COUNT)]
+    connection_assignment_lock = asyncio.Lock()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        # Preload model/session at startup.
-        engine = api.engine
-        print(
-            "Model config: "
-            f"nfe_step={config.nfe_step}, "
-            f"fuse_nfe={config.fuse_nfe}, "
-            f"speed={config.speed}, "
-            f"sample_rate={config.sample_rate}, "
-            f"inter_op_threads={config.inter_op_num_threads}, "
-            f"intra_op_threads={config.intra_op_num_threads}, "
-            f"cuda_device_id={config.cuda_device_id}, "
-            f"cuda_conv_algo_search={config.cuda_conv_algo_search}, "
-            f"cuda_conv_use_max_workspace={config.cuda_conv_use_max_workspace}, "
-            f"cuda_copy_in_default_stream={config.cuda_copy_in_default_stream}, "
-            f"enable_cuda_graph={config.enable_cuda_graph}, "
-            f"providers={engine.model_session_manager.providers}"
-        )
+        # Preload all model sessions at startup.
+        for idx, api in enumerate(engine_apis):
+            engine = api.engine
+            config = api.config
+            print(
+                f"Engine[{idx}] config: "
+                f"nfe_step={config.nfe_step}, "
+                f"fuse_nfe={config.fuse_nfe}, "
+                f"speed={config.speed}, "
+                f"sample_rate={config.sample_rate}, "
+                f"inter_op_threads={config.inter_op_num_threads}, "
+                f"intra_op_threads={config.intra_op_num_threads}, "
+                f"cuda_device_id={config.cuda_device_id}, "
+                f"cuda_conv_algo_search={config.cuda_conv_algo_search}, "
+                f"cuda_conv_use_max_workspace={config.cuda_conv_use_max_workspace}, "
+                f"cuda_copy_in_default_stream={config.cuda_copy_in_default_stream}, "
+                f"enable_cuda_graph={config.enable_cuda_graph}, "
+                f"providers={engine.model_session_manager.providers}"
+            )
+
         # Warm-up with short/medium/long text so first real request is ready.
         warmup_texts = (
             "Xin chao.",
@@ -86,12 +93,15 @@ def create_app() -> FastAPI:
             "Day la cau warm-up dai hon de mo truoc cache shape va duong suy dien cho workload thuc te,"
             " giup request dau tien phan hoi nhanh va it bien dong hon.",
         )
-        for warmup_text in warmup_texts:
-            await asyncio.to_thread(api.synthesize_to_bytes, warmup_text)
+        for api in engine_apis:
+            for warmup_text in warmup_texts:
+                await asyncio.to_thread(api.synthesize_to_bytes, warmup_text)
+
         try:
             yield
         finally:
-            api.cleanup()
+            for api in engine_apis:
+                api.cleanup()
 
     app = FastAPI(title="VietVoice TTS WebSocket Server", lifespan=lifespan)
 
@@ -103,9 +113,15 @@ def create_app() -> FastAPI:
     async def ws_infer(websocket: WebSocket) -> None:
         nonlocal active_ws_count
 
+        assigned_engine_idx = -1
         has_ws_slot = False
-        async with active_ws_count_lock:
+        async with connection_assignment_lock:
             if active_ws_count < LOCKED_MAX_ACTIVE_WEBSOCKETS:
+                # Keep websocket pinned to one engine for stable low TTFB.
+                assigned_engine_idx = min(
+                    range(LOCKED_ENGINE_COUNT), key=lambda idx: engine_ws_counts[idx]
+                )
+                engine_ws_counts[assigned_engine_idx] += 1
                 active_ws_count += 1
                 has_ws_slot = True
 
@@ -117,6 +133,8 @@ def create_app() -> FastAPI:
             return
 
         await websocket.accept()
+        assigned_api = engine_apis[assigned_engine_idx]
+        assigned_engine_lock = engine_inference_locks[assigned_engine_idx]
         client_queue: asyncio.Queue[str | None] = asyncio.Queue(
             maxsize=LOCKED_PER_CLIENT_QUEUE_SIZE
         )
@@ -131,10 +149,10 @@ def create_app() -> FastAPI:
             await send_frame(b"")
 
         async def run_inference_locked(text: str) -> tuple[bytes, float]:
-            # Never release inference lock before background inference thread is done.
-            async with inference_lock:
+            # Never release engine lock before background inference thread is done.
+            async with assigned_engine_lock:
                 infer_task = asyncio.create_task(
-                    asyncio.to_thread(api.synthesize_to_bytes, text)
+                    asyncio.to_thread(assigned_api.synthesize_to_bytes, text)
                 )
                 try:
                     return await asyncio.shield(infer_task)
@@ -150,7 +168,7 @@ def create_app() -> FastAPI:
                     break
 
                 try:
-                    print(f"Processing text: {text}")
+                    print(f"Engine[{assigned_engine_idx}] processing text: {text}")
                     wav_bytes, _ = await run_inference_locked(text)
 
                     for start in range(0, len(wav_bytes), LOCKED_CHUNK_SIZE):
@@ -199,9 +217,13 @@ def create_app() -> FastAPI:
             with suppress(Exception):
                 await consumer_task
 
-            async with active_ws_count_lock:
+            async with connection_assignment_lock:
                 if active_ws_count > 0:
                     active_ws_count -= 1
+                if assigned_engine_idx >= 0:
+                    engine_ws_counts[assigned_engine_idx] = max(
+                        0, engine_ws_counts[assigned_engine_idx] - 1
+                    )
 
     return app
 
