@@ -211,9 +211,7 @@ async def run_benchmark() -> int:
     try:
         async with AsyncExitStack() as stack:
             sockets = [
-                await stack.enter_async_context(
-                    websockets.connect(WS_URL, max_size=None)
-                )
+                await stack.enter_async_context(websockets.connect(WS_URL, max_size=None))
                 for _ in range(CONCURRENT_WEBSOCKETS)
             ]
             print(f"All {CONCURRENT_WEBSOCKETS} websocket connections established.")

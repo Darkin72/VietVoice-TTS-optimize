@@ -4,7 +4,7 @@ Repository này tập trung vào 3 phần chính:
 
 - Core model inference: vietvoicetts/
 - WebSocket server cho suy luận TTS: benchmark/ws_server.py
-- Bộ benchmark đo hiệu năng: benchmark/ws_benchmark.py và benchmark/ws_concurrent_4ws_10req_benchmark.py
+- Bộ benchmark đo hiệu năng: benchmark/ws_benchmark.py và benchmark/ws_concurrent_6ws_30req_benchmark.py
 
 ## 1) Môi trường
 
@@ -37,10 +37,10 @@ Các thay đổi lớn đã áp dụng cho server và benchmark:
 1. Cố định profile chạy production (speed, nfe_step, provider options) để kết quả ổn định.
 2. Preload model + warm-up nhiều câu ngay lúc startup để giảm cold start.
 3. Bảo vệ engine dùng chung bằng khóa suy luận (inference lock), tránh truy cập đồng thời gây race condition.
-4. Giới hạn tối đa 4 kết nối WebSocket đang hoạt động cùng lúc.
+4. Giới hạn tối đa 6 kết nối WebSocket đang hoạt động cùng lúc.
 5. Mỗi client có queue riêng, message concurrent từ cùng client sẽ được xếp hàng và xử lý FIFO.
 6. Gửi frame WebSocket theo khóa gửi riêng (send lock) để tránh ghi chồng frame khi có nhiều coroutine.
-7. Thêm benchmark concurrent mới: mở 4 websocket và bắn đồng thời 10 request để mô phỏng tải callBot.
+7. Thêm benchmark concurrent mới: mở 6 websocket và bắn đồng thời 30 request để mô phỏng tải callBot.
 
 ## 4) Chạy WebSocket server
 
@@ -54,13 +54,13 @@ Server sẽ:
 - warm-up trước khi nhận request thật
 - mở health check: http://127.0.0.1:8765/health
 - mở websocket endpoint: ws://127.0.0.1:8765/ws
-- giới hạn 4 websocket active
+- giới hạn 6 websocket active
 - tạo queue riêng cho từng websocket client
 
 Các ngưỡng vận hành hiện được khóa trong mã nguồn tại benchmark/ws_server.py:
 
-- LOCKED_MAX_ACTIVE_WEBSOCKETS = 4
-- LOCKED_PER_CLIENT_QUEUE_SIZE = 32
+- LOCKED_MAX_ACTIVE_WEBSOCKETS = 6
+- LOCKED_PER_CLIENT_QUEUE_SIZE = 40
 - LOCKED_CHUNK_SIZE = 16384
 
 ## 5) Protocol WebSocket (binary)
@@ -88,22 +88,22 @@ Mặc định script sẽ:
 - lưu audio câu dài nhất thành công vào benchmark/ws_longest_query.wav
 - lưu text câu dài nhất vào benchmark/ws_longest_query.txt
 
-## 7) Chạy benchmark concurrent (4 WS + 10 request)
+## 7) Chạy benchmark concurrent (6 WS + 30 request)
 
 ```bash
-python benchmark/ws_concurrent_4ws_10req_benchmark.py
+python benchmark/ws_concurrent_6ws_30req_benchmark.py
 ```
 
 Kịch bản:
 
-1. Mở đúng 4 kết nối websocket.
-2. Tạo đúng 10 request và phát đồng thời.
-3. Phân phối request theo round-robin vào 4 kết nối.
+1. Mở đúng 6 kết nối websocket.
+2. Tạo đúng 30 request và phát đồng thời.
+3. Phân phối request theo round-robin vào 6 kết nối.
 4. Mỗi kết nối vẫn xử lý tuần tự theo queue phía server.
 
 Output mặc định:
 
-- benchmark/ws_concurrent_4ws_10req_results.csv
+- benchmark/ws_concurrent_6ws_30req_results.csv
 
 ## 8) Bảng tổng hợp tối ưu từ các file CSV
 
@@ -141,5 +141,5 @@ Kỳ vọng:
 - vietvoicetts/: model config, preprocessing, inference engine
 - benchmark/ws_server.py: websocket inference server
 - benchmark/ws_benchmark.py: benchmark tuần tự 50 câu
-- benchmark/ws_concurrent_4ws_10req_benchmark.py: benchmark concurrent 4 websocket + 10 request
+- benchmark/ws_concurrent_6ws_30req_benchmark.py: benchmark concurrent 6 websocket + 30 request
 - pyproject.toml: dependencies và extras
