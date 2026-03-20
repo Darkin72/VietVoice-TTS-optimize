@@ -2,7 +2,7 @@
 
 Scenario:
 1) Open exactly 4 websocket connections.
-2) Dispatch 10 requests concurrently at nearly the same time.
+2) Dispatch 20 requests concurrently at nearly the same time.
 3) Requests are assigned round-robin to the 4 connections.
 4) Each connection processes its own assigned requests sequentially
    to keep request/response framing synchronized per websocket.
@@ -23,23 +23,33 @@ import websockets
 
 
 WS_URL = "ws://127.0.0.1:8765/ws"
-OUTPUT_CSV = "benchmark/ws_concurrent_4ws_10req_results.csv"
+OUTPUT_CSV = "benchmark/ws_concurrent_4ws_20req_results.csv"
 
 CONCURRENT_WEBSOCKETS = 4
-TOTAL_REQUESTS = 10
+TOTAL_REQUESTS = 20
 
 # Hardcoded Vietnamese sentences for deterministic benchmark behavior.
 TEST_TEXTS: Sequence[str] = (
-    "Xin chao ban, toi dang thu nghiem he thong callBot.",
-    "He thong can phan hoi nhanh va on dinh khi co nhieu nguoi goi cung luc.",
-    "Ban hay doc cau nay voi nhip dieu tu nhien va ro rang.",
-    "Do tre phan hoi dau tien la chi so rat quan trong cho trai nghiem thoai.",
-    "Neu hang doi hop ly, chat luong am thanh van co the giu on dinh.",
-    "Moi yeu cau duoc xu ly tuan tu theo tung ket noi websocket rieng.",
-    "Kich ban nay mo phong bon ket noi dong thoi gui nhieu thong diep.",
-    "Muc tieu la tranh race condition va van dam bao do tre chap nhan duoc.",
-    "Ban benchmark nay su dung du lieu co dinh de ket qua de so sanh qua cac lan chay.",
-    "Sau khi chay xong, chung ta xem p50 va p95 cua TTFB de danh gia hieu nang.",
+    "Xin chào bạn, tôi đang thử nghiệm hệ thống callbot.",
+    "Hệ thống cần phản hồi nhanh và ổn định khi có nhiều người gọi cùng lúc.",
+    "Bạn hãy đọc câu này với nhịp điệu tự nhiên và rõ ràng.",
+    "Độ trễ phản hồi đầu tiên là chỉ số rất quan trọng cho trải nghiệm thoại.",
+    "Nếu hàng đợi hợp lý, chất lượng âm thanh vẫn có thể giữ ổn định.",
+    "Mỗi yêu cầu được xử lý tuần tự theo từng kết nối websocket riêng.",
+    "Kịch bản này mô phỏng bốn kết nối đồng thời gửi nhiều thông điệp.",
+    "Mục tiêu là tránh race condition và vẫn đảm bảo độ trễ chấp nhận được.",
+    "Bản benchmark này sử dụng dữ liệu cố định để kết quả dễ so sánh qua các lần chạy.",
+    "Sau khi chạy xong, chúng ta xem p50 và p95 của TTFB để đánh giá hiệu năng.",
+    "Khi số request tăng, hệ thống cần giữ nhịp phản hồi nhất quán giữa các kết nối.",
+    "Luồng xử lý tách theo engine giúp giảm hiện tượng cộng dồn TTFB.",
+    "Mỗi engine nên nhận tải tương đối cân bằng để tránh nghẽn cục bộ.",
+    "Âm thanh đầu ra cần đủ rõ để người dùng không phải nghe lại nhiều lần.",
+    "Bài đo này ưu tiên tính lặp lại để tiện theo dõi xu hướng tối ưu.",
+    "Trong điều kiện tải cao, độ lệch giữa các request nên được kiểm soát.",
+    "Nếu có lỗi, hệ thống cần trả thông điệp rõ ràng và đóng gói đúng khung dữ liệu.",
+    "Mục đích cuối cùng là cải thiện thời gian phản hồi đầu tiên cho người gọi.",
+    "Chúng ta cũng theo dõi tổng thời gian xử lý để đánh giá throughput thực tế.",
+    "Sau mỗi thay đổi, cần chạy lại cùng bộ câu để so sánh công bằng.",
 )
 
 
@@ -180,8 +190,8 @@ def save_csv(path: str, results: List[RequestResult]) -> None:
 async def run_benchmark() -> int:
     if CONCURRENT_WEBSOCKETS != 4:
         raise ValueError("This benchmark is fixed to exactly 4 websocket connections")
-    if TOTAL_REQUESTS != 10:
-        raise ValueError("This benchmark is fixed to exactly 10 requests")
+    if TOTAL_REQUESTS != 20:
+        raise ValueError("This benchmark is fixed to exactly 20 requests")
 
     print(f"Connecting to {WS_URL} with {CONCURRENT_WEBSOCKETS} websocket clients...")
 
