@@ -115,6 +115,7 @@ Nguồn dữ liệu:
 - benchmark/final_heuristic.csv
 
 Tất cả các file trên đều có 50 mẫu và success rate 100%.
+Phần cứng Colab A100 (40GB).
 
 | Profile                                      | TTFB p50 (ms) | TTFB p95 (ms) | TTFB mean (ms) | Total p50 (ms) | Total p95 (ms) | Total mean (ms) | Cải thiện mean TTFB vs baseline | Cải thiện mean Total vs baseline |
 | -------------------------------------------- | ------------: | ------------: | -------------: | -------------: | -------------: | --------------: | ------------------------------: | -------------------------------: |
