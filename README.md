@@ -4,7 +4,7 @@ Repository này tập trung vào 3 phần chính:
 
 - Core model inference: vietvoicetts/
 - WebSocket server cho suy luận TTS: benchmark/ws_server.py
-- Bộ benchmark đo hiệu năng: benchmark/ws_benchmark.py và benchmark/ws_concurrent_6ws_30req_benchmark.py
+- Bộ benchmark đo hiệu năng: benchmark/ws_benchmark.py và benchmark/ws_concurrent_benchmark.py
 
 ## 1) Môi trường
 
@@ -40,7 +40,7 @@ Các thay đổi lớn đã áp dụng cho server và benchmark:
 4. Giới hạn tối đa 6 kết nối WebSocket đang hoạt động cùng lúc.
 5. Mỗi client có queue riêng, message concurrent từ cùng client sẽ được xếp hàng và xử lý FIFO.
 6. Gửi frame WebSocket theo khóa gửi riêng (send lock) để tránh ghi chồng frame khi có nhiều coroutine.
-7. Thêm benchmark concurrent mới: mở 6 websocket và bắn đồng thời 30 request để mô phỏng tải callBot.
+7. Thêm benchmark concurrent có tham số: websocket từ 1-6 và concurrent request từ 1-100.
 
 ## 4) Chạy WebSocket server
 
@@ -88,22 +88,22 @@ Mặc định script sẽ:
 - lưu audio câu dài nhất thành công vào benchmark/ws_longest_query.wav
 - lưu text câu dài nhất vào benchmark/ws_longest_query.txt
 
-## 7) Chạy benchmark concurrent (6 WS + 30 request)
+## 7) Chạy benchmark concurrent (parametric)
 
 ```bash
-python benchmark/ws_concurrent_6ws_30req_benchmark.py
+python benchmark/ws_concurrent_benchmark.py --websockets 6 --concurrent-requests 30
 ```
 
 Kịch bản:
 
-1. Mở đúng 6 kết nối websocket.
-2. Tạo đúng 30 request và phát đồng thời.
-3. Phân phối request theo round-robin vào 6 kết nối.
+1. Mở số websocket theo tham số `--websockets` (1 đến 6).
+2. Tạo số request đồng thời theo tham số `--concurrent-requests` (1 đến 100).
+3. Phân phối request theo round-robin vào các kết nối websocket.
 4. Mỗi kết nối vẫn xử lý tuần tự theo queue phía server.
 
 Output mặc định:
 
-- benchmark/ws_concurrent_6ws_30req_results.csv
+- benchmark/ws*concurrent*{websockets}ws\_{requests}req_results.csv
 
 ## 8) Bảng tổng hợp tối ưu từ các file CSV
 
@@ -141,5 +141,5 @@ Kỳ vọng:
 - vietvoicetts/: model config, preprocessing, inference engine
 - benchmark/ws_server.py: websocket inference server
 - benchmark/ws_benchmark.py: benchmark tuần tự 50 câu
-- benchmark/ws_concurrent_6ws_30req_benchmark.py: benchmark concurrent 6 websocket + 30 request
+- benchmark/ws_concurrent_benchmark.py: benchmark concurrent có tham số websocket/request
 - pyproject.toml: dependencies và extras

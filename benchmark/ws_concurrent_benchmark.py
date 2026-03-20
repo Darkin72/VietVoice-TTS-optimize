@@ -11,6 +11,7 @@ Scenario:
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import csv
 import statistics
@@ -24,10 +25,14 @@ import websockets
 
 
 WS_URL = "ws://127.0.0.1:8765/ws"
-OUTPUT_CSV = "benchmark/ws_concurrent_6ws_30req_results.csv"
+OUTPUT_CSV_TEMPLATE = "benchmark/ws_concurrent_{websockets}ws_{requests}req_results.csv"
 
-CONCURRENT_WEBSOCKETS = 6
-TOTAL_REQUESTS = 30
+DEFAULT_CONCURRENT_WEBSOCKETS = 6
+DEFAULT_TOTAL_REQUESTS = 30
+MIN_CONCURRENT_WEBSOCKETS = 1
+MAX_CONCURRENT_WEBSOCKETS = 6
+MIN_TOTAL_REQUESTS = 1
+MAX_TOTAL_REQUESTS = 100
 
 # Hardcoded Vietnamese sentences for deterministic benchmark behavior.
 TEST_TEXTS: Sequence[str] = (
@@ -155,14 +160,16 @@ async def connection_worker(
         done_map[request_id] = result
 
 
-def summarize(results: List[RequestResult]) -> None:
+def summarize(
+    results: List[RequestResult], concurrent_websockets: int, total_requests: int
+) -> None:
     total = len(results)
     oks = [r for r in results if r.ok]
     fails = [r for r in results if not r.ok]
 
     print("\n===== Concurrent Benchmark Summary =====")
-    print(f"Connections: {CONCURRENT_WEBSOCKETS}")
-    print(f"Total concurrent requests: {TOTAL_REQUESTS}")
+    print(f"Connections: {concurrent_websockets}")
+    print(f"Total concurrent requests: {total_requests}")
     print(f"Success: {len(oks)}")
     print(f"Failed: {len(fails)}")
 
@@ -198,15 +205,12 @@ def save_csv(path: str, results: List[RequestResult]) -> None:
             writer.writerow(asdict(result))
 
 
-async def run_benchmark() -> int:
-    if CONCURRENT_WEBSOCKETS != 6:
-        raise ValueError("This benchmark is fixed to exactly 6 websocket connections")
-    if TOTAL_REQUESTS != 30:
-        raise ValueError("This benchmark is fixed to exactly 30 requests")
-    if len(TEST_TEXTS) < TOTAL_REQUESTS:
-        raise ValueError("TEST_TEXTS must contain at least TOTAL_REQUESTS sentences")
+async def run_benchmark(concurrent_websockets: int, total_requests: int) -> int:
+    output_csv = OUTPUT_CSV_TEMPLATE.format(
+        websockets=concurrent_websockets, requests=total_requests
+    )
 
-    print(f"Connecting to {WS_URL} with {CONCURRENT_WEBSOCKETS} websocket clients...")
+    print(f"Connecting to {WS_URL} with {concurrent_websockets} websocket clients...")
 
     try:
         async with AsyncExitStack() as stack:
@@ -214,16 +218,17 @@ async def run_benchmark() -> int:
                 await stack.enter_async_context(
                     websockets.connect(WS_URL, max_size=None)
                 )
-                for _ in range(CONCURRENT_WEBSOCKETS)
+                for _ in range(concurrent_websockets)
             ]
-            print(f"All {CONCURRENT_WEBSOCKETS} websocket connections established.")
+            print(f"All {concurrent_websockets} websocket connections established.")
 
             jobs_per_connection: list[list[tuple[int, str]]] = [
-                [] for _ in range(CONCURRENT_WEBSOCKETS)
+                [] for _ in range(concurrent_websockets)
             ]
-            for request_id in range(1, TOTAL_REQUESTS + 1):
-                text = TEST_TEXTS[request_id - 1]
-                conn_id = (request_id - 1) % CONCURRENT_WEBSOCKETS
+            # Repeat deterministic text list when total_requests > len(TEST_TEXTS).
+            for request_id in range(1, total_requests + 1):
+                text = TEST_TEXTS[(request_id - 1) % len(TEST_TEXTS)]
+                conn_id = (request_id - 1) % concurrent_websockets
                 jobs_per_connection[conn_id].append((request_id, text))
 
             start_event = asyncio.Event()
@@ -239,7 +244,7 @@ async def run_benchmark() -> int:
                         done_map=done_map,
                     )
                 )
-                for idx in range(CONCURRENT_WEBSOCKETS)
+                for idx in range(concurrent_websockets)
             ]
 
             start_at = time.perf_counter()
@@ -247,7 +252,7 @@ async def run_benchmark() -> int:
             await asyncio.gather(*workers)
             wall_ms = (time.perf_counter() - start_at) * 1000.0
 
-            ordered_results = [done_map[i] for i in range(1, TOTAL_REQUESTS + 1)]
+            ordered_results = [done_map[i] for i in range(1, total_requests + 1)]
 
             print("\n===== Per Request =====")
             for r in ordered_results:
@@ -258,11 +263,11 @@ async def run_benchmark() -> int:
                     f"bytes={r.response_bytes}"
                 )
 
-            summarize(ordered_results)
+            summarize(ordered_results, concurrent_websockets, total_requests)
             print(f"\nWall-clock time for whole run: {wall_ms:.2f}ms")
 
-            save_csv(OUTPUT_CSV, ordered_results)
-            print(f"Saved detailed results to: {OUTPUT_CSV}")
+            save_csv(output_csv, ordered_results)
+            print(f"Saved detailed results to: {output_csv}")
 
             return 0
 
@@ -271,8 +276,60 @@ async def run_benchmark() -> int:
         return 1
 
 
+def bounded_int(value: str, min_value: int, max_value: int, param_name: str) -> int:
+    try:
+        num = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{param_name} must be an integer") from exc
+
+    if num < min_value or num > max_value:
+        raise argparse.ArgumentTypeError(
+            f"{param_name} must be in range [{min_value}, {max_value}]"
+        )
+    return num
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Concurrent WebSocket benchmark")
+    parser.add_argument(
+        "--websockets",
+        type=lambda v: bounded_int(
+            v,
+            MIN_CONCURRENT_WEBSOCKETS,
+            MAX_CONCURRENT_WEBSOCKETS,
+            "--websockets",
+        ),
+        default=DEFAULT_CONCURRENT_WEBSOCKETS,
+        help=(
+            f"Number of websocket clients "
+            f"({MIN_CONCURRENT_WEBSOCKETS}-{MAX_CONCURRENT_WEBSOCKETS})"
+        ),
+    )
+    parser.add_argument(
+        "--concurrent-requests",
+        type=lambda v: bounded_int(
+            v,
+            MIN_TOTAL_REQUESTS,
+            MAX_TOTAL_REQUESTS,
+            "--concurrent-requests",
+        ),
+        default=DEFAULT_TOTAL_REQUESTS,
+        help=(
+            f"Number of requests fired together "
+            f"({MIN_TOTAL_REQUESTS}-{MAX_TOTAL_REQUESTS})"
+        ),
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
-    exit_code = asyncio.run(run_benchmark())
+    args = parse_args()
+    exit_code = asyncio.run(
+        run_benchmark(
+            concurrent_websockets=args.websockets,
+            total_requests=args.concurrent_requests,
+        )
+    )
     raise SystemExit(exit_code)
 
 
